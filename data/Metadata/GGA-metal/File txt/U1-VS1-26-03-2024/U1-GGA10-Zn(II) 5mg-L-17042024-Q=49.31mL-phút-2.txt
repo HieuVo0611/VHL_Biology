@@ -1,4 +1,0 @@
-U5 - 17.04.2024 - Bảng dữ liệu 1 thiếu 2 kết quả
-U8-VS2-03.05.2024 - Có 1 giá trị không rõ
-U15-VS2-08.05.2024 - Có 4 giá trị không rõ
-U19-H1-VS2-10.05.2024 - Căn chỉnh tên mẫu bảng dữ liệu
