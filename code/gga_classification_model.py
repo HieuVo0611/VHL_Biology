@@ -1,13 +1,15 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import xgboost as xgb
+from icecream import ic
 from scipy.stats import skew, kurtosis
 from scipy.fft import fft
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
-import matplotlib.pyplot as plt
-import seaborn as sns
-from icecream import ic
+from sklearn.preprocessing import LabelEncoder
 
 # Set random seed for all libraries
 SEED = 42
@@ -149,11 +151,11 @@ def aggregate_features(df, has_label=True):
 
 # Read and combine training data
 df_gga = pd.read_csv('metadata-gga-2024-10-23.csv')
-df_gga['label'] = 'gga'
+df_gga['label'] = 'gga' #157
 df_gga_metal = pd.read_csv('metadata-gga-metal-2024-10-23.csv')
-df_gga_metal['label'] = 'gga-metal'
+df_gga_metal['label'] = 'gga-metal' #360 
 df_gga_metal_hh = pd.read_csv('metadata-gga-metal-hh-2024-10-23.csv')
-df_gga_metal_hh['label'] = 'gga-metal'
+df_gga_metal_hh['label'] = 'gga-metal'  #105
 
 # Print sample counts
 print("\nSample counts:")
@@ -182,7 +184,7 @@ y = df_train_aggregated['label']
 X.columns = X.columns.astype(str)
 
 # Split data into training and test sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=SEED)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.4, stratify=y, random_state=SEED)
 
 # Reset indices
 X_train = X_train.reset_index(drop=True)
@@ -196,49 +198,106 @@ ic(X_train.shape)
 ic(y_train.head())
 ic(len(y_train))
 
+# Encode labels for XGBoost
+le = LabelEncoder()
+y_train_encoded = le.fit_transform(y_train)
+y_test_encoded = le.transform(y_test)
+
 # Train Random Forest model
-model = RandomForestClassifier(n_estimators=100, random_state=SEED, class_weight='balanced')
-model.fit(X_train, y_train)
+rf_model = RandomForestClassifier(n_estimators=100, random_state=SEED, class_weight='balanced')
+rf_model.fit(X_train, y_train)
 
-# Evaluate model on test set
-y_pred = model.predict(X_test)
-print("\nModel evaluation on test set:")
-print(classification_report(y_test, y_pred))
+# Train XGBoost model
+xgb_model = xgb.XGBClassifier(
+    n_estimators=100,
+    learning_rate=0.1,
+    max_depth=6,
+    min_child_weight=1,
+    gamma=0,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    objective='binary:logistic',
+    scale_pos_weight=1,
+    random_state=SEED
+)
+xgb_model.fit(X_train, y_train_encoded)
 
-# Feature importance analysis
-feature_importance = pd.DataFrame({
+# Evaluate Random Forest model
+rf_y_pred = rf_model.predict(X_test)
+print("\nRandom Forest Model evaluation on test set:")
+print(classification_report(y_test, rf_y_pred))
+
+# Evaluate XGBoost model
+xgb_y_pred = le.inverse_transform(xgb_model.predict(X_test))
+print("\nXGBoost Model evaluation on test set:")
+print(classification_report(y_test, xgb_y_pred))
+
+# Feature importance analysis for Random Forest
+rf_feature_importance = pd.DataFrame({
     'feature': X.columns,
-    'importance': model.feature_importances_
+    'importance': rf_model.feature_importances_
 })
-feature_importance = feature_importance.sort_values('importance', ascending=False)
+rf_feature_importance = rf_feature_importance.sort_values('importance', ascending=False)
 
-# Print top 20 most important features
-print("\nTop 20 most important features:")
-print(feature_importance.head(20))
+# Feature importance analysis for XGBoost
+xgb_feature_importance = pd.DataFrame({
+    'feature': X.columns,
+    'importance': xgb_model.feature_importances_
+})
+xgb_feature_importance = xgb_feature_importance.sort_values('importance', ascending=False)
 
-# Plot feature importance
-plt.figure(figsize=(12, 8))
-sns.barplot(x='importance', y='feature', data=feature_importance.head(20))
-plt.title('Top 20 Most Important Features')
-plt.xlabel('Importance Score')
-plt.ylabel('Feature')
+# Print top 20 most important features for both models
+print("\nTop 20 most important features - Random Forest:")
+print(rf_feature_importance.head(20))
+
+print("\nTop 20 most important features - XGBoost:")
+print(xgb_feature_importance.head(20))
+
+# Plot feature importance for both models
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+
+# Random Forest feature importance
+sns.barplot(x='importance', y='feature', data=rf_feature_importance.head(20), ax=ax1)
+ax1.set_title('Top 20 Most Important Features - Random Forest')
+ax1.set_xlabel('Importance Score')
+ax1.set_ylabel('Feature')
+
+# XGBoost feature importance
+sns.barplot(x='importance', y='feature', data=xgb_feature_importance.head(20), ax=ax2)
+ax2.set_title('Top 20 Most Important Features - XGBoost')
+ax2.set_xlabel('Importance Score')
+ax2.set_ylabel('Feature')
+
 plt.tight_layout()
-plt.savefig('feature_importance.png')
+plt.savefig('feature_importance_comparison.png')
 plt.close()
 
 # Inference on test_example.csv
-df_test = pd.read_csv('test_example.csv')
+df_test = pd.read_csv('sample/test_example.csv')
 df_test_aggregated = aggregate_features(df_test, has_label=False)
 df_test_aggregated.fillna(0, inplace=True)
 
-# Make predictions
+# Make predictions with both models
 X_test_final = df_test_aggregated[features]
 X_test_final.columns = X_test_final.columns.astype(str)
-predictions = model.predict(X_test_final)
-probabilities = model.predict_proba(X_test_final)
+
+# Random Forest predictions
+rf_predictions = rf_model.predict(X_test_final)
+rf_probabilities = rf_model.predict_proba(X_test_final)
+
+# XGBoost predictions
+xgb_predictions = le.inverse_transform(xgb_model.predict(X_test_final))
+xgb_probabilities = xgb_model.predict_proba(X_test_final)
 
 # Print results
 print("\nPredictions for samples in test_example.csv:")
-for name, pred, prob in zip(df_test['Sample Name'].unique(), predictions, probabilities):
-    print(f"Sample: {name}")
-    print(f"Prediction: {pred}, Probability: {prob}\n")
+for name, rf_pred, rf_prob, xgb_pred, xgb_prob in zip(
+    df_test['Sample Name'].unique(), 
+    rf_predictions, 
+    rf_probabilities,
+    xgb_predictions,
+    xgb_probabilities
+):
+    print(f"\nSample: {name}")
+    print(f"Random Forest - Prediction: {rf_pred}, Probability: {rf_prob}")
+    print(f"XGBoost - Prediction: {xgb_pred}, Probability: {xgb_prob}")
