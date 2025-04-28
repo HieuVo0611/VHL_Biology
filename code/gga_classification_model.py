@@ -273,7 +273,7 @@ plt.savefig('feature_importance_comparison.png')
 plt.close()
 
 # Inference on test_example.csv
-df_test = pd.read_csv('sample/test_example.csv')
+df_test = pd.read_csv('test_example.csv')
 df_test_aggregated = aggregate_features(df_test, has_label=False)
 df_test_aggregated.fillna(0, inplace=True)
 
