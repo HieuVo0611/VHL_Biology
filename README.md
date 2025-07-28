@@ -36,6 +36,7 @@ This project contains code for analyzing and classifying biological data.
 - `sample/test_example.csv`: Test data for model prediction
 
 ## Setup
+
 1. Install required dependencies:
 ```bash
 pip install -r requirements.txt
@@ -46,8 +47,34 @@ pip install -r requirements.txt
 python code/gga_classification_model.py
 ```
 
+## Streamlit App Tutorial
+
+You can use the interactive dashboard for prediction, classification, and toxicity calculation.
+
+1. **Run the Streamlit app:**
+```bash
+streamlit run app.py
+```
+
+2. **Using the dashboard:**
+   - Upload your `.txt` and `.xlsx` sample files using the upload section.
+   - Click the buttons to run LSTM prediction, classification, or toxicity calculation.
+   - Results and plots will be displayed directly in the browser.
+
+### Path Configuration
+
+- If you need to change file or model paths (for example, model files, input data), edit the relevant lines in `app.py` or `src/utils.py`.
+- Example in `app.py`:
+  ```python
+  model_path="model/Encoder Decoder LSTM Model/08_01_2025/enc-dec_lstm_model.h5"
+  ```
+- Make sure your paths are correct relative to the project root, or use absolute paths if needed.
+
+---
+
 ## Output
 The script will generate:
 - Classification reports for both Random Forest and XGBoost models
 - Feature importance plots saved as 'feature_importance_comparison.png'
-- Predictions for test samples 
+- Predictions for test samples
+- Interactive dashboard results via Streamlit
