@@ -9,7 +9,6 @@ from sklearn.preprocessing import MinMaxScaler
 from keras.models import load_model
 from sklearn.metrics import mean_squared_error
 
-
 def extract_stages_from_metadata(df, sample_name):
     """
     Trích xuất stage1 và stage2 từ bảng metadata dựa trên sample_name.
@@ -509,6 +508,6 @@ if __name__ == "__main__":
 
     # Example usage in Streamlit:
     import streamlit as st
-    fig = process_and_predict_lstm(r'data/GGA/File txt/N4-VS1-25-03-2024/10-5/N4-10-5-01042024-Q=49.81mL_phút-3.txt', 'model/Encoder Decoder LSTM Model/08_01_2025/enc-dec_lstm_model.h5')
+    fig = process_and_predict_lstm(r'data/GGA/File txt/N4-VS1-25-03-2024/10-5/N4-10-5-01042024-Q=49.81mL_phút-3.txt', 'model/LSTM Model/28_07_2025/enc-dec_lstm_model.h5')
     st.plotly_chart(fig)
 

@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import os
-from utils import process_and_predict_lstm, catboost_inference_from_csv, calculate_toxicity, extract_metadata_single_sample
+from src.utils import process_and_predict_lstm, catboost_inference_from_csv, calculate_toxicity, extract_metadata_single_sample
 
 # Streamlit page configuration
 st.set_page_config(page_title="Bio Data Analysis", layout="wide", page_icon="📊")
@@ -82,7 +82,7 @@ if st.button("Run LSTM Prediction", disabled=not st.session_state.txt_file):
         # Run LSTM prediction
         fig = process_and_predict_lstm(
             txt_file_path="temp.txt",
-            model_path="model/Encoder Decoder LSTM Model/08_01_2025/enc-dec_lstm_model.h5",
+            model_path="model/LSTM Model/28_07_2025/enc-dec_lstm_model.h5",
             lookback=7,
             train_size=0.6,
             val_size=0.2
