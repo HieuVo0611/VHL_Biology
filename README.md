@@ -66,7 +66,7 @@ streamlit run app.py
 - If you need to change file or model paths (for example, model files, input data), edit the relevant lines in `app.py` or `src/utils.py`.
 - Example in `app.py`:
   ```python
-  model_path="model/Encoder Decoder LSTM Model/08_01_2025/enc-dec_lstm_model.h5"
+  model_path="model/LSTM Model/28_07_2025/enc-dec_lstm_model.h5"
   ```
 - Make sure your paths are correct relative to the project root, or use absolute paths if needed.
 
