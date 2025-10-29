@@ -50,28 +50,7 @@ for file in glob.glob("BOD2024-Nhung/GGA-metal/File txt/**/*.txt", recursive=Tru
     all_data = pd.concat([all_data, temp_data])
     # read_files.append(file)
 
-# To check all actual files in the directory
-# all_files = glob.glob("BOD2024-Nhung/GGA/File txt/**/*.txt", recursive=True)
-
-# Compare the list of read files with the list of actual files
-# missing_files = set(all_files) - set(read_files)
-# if not missing_files:
-#     print("All files have been read and processed.")
-# else:
-#     print("The following files were not read:")
-#     for file in missing_files:
-#         print(file)
-
 # Reset the index of the final DataFrame
 all_data.reset_index(drop=True, inplace=True)
-
-# Check for rows with missing values
-# missing_values = all_data[all_data.isna().any(axis=1)]
-# if not missing_values.empty:
-#     print("The following rows have missing values:")
-#     print(missing_values)
-
-# Display the DataFrame containing all the data
-# print(all_data.head())
 
 all_data.to_csv("metadata-gga_metal-txt.csv", index=False, encoding="utf-8-sig")
