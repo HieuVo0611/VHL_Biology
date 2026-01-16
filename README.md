@@ -1,80 +1,95 @@
 # VHL Biology Project
 
-This project contains code for analyzing and classifying biological data.
+Dissolved oxygen (DO) analysis system using ML models to classify biological samples (GGA vs GGA-metal) and extract special points for BOD (Biochemical Oxygen Demand) calculation.
 
-## File Structure
+## Quick Start
 
-### Code Files (`/code`)
-- `gga_classification_model.py`: Main script for training and evaluating classification models
-  - Feature extraction and aggregation from input data
-  - Training of both Random Forest and XGBoost models
-  - Model evaluation and feature importance analysis
-  - Prediction on test data
-
-- `extract_DO_in.py`: Script for extracting dissolved oxygen (DO) data from input files
-
-- `process_txt_data.py`: Utility for processing text data files
-
-- `ema_model.py`: Implementation of Exponential Moving Average model
-
-- `predict_BOD-value_future.ipynb`: Jupyter notebook for BOD value prediction
-
-### Notebooks (`/notebooks`)
-- `ARIMA_1_0_Bio_VHL.ipynb`: ARIMA model implementation for time series analysis
-- `LSTM_Bio_VHL.ipynb`: LSTM neural network implementation
-- `LR_BIO_VHL.ipynb`: Linear Regression model implementation
-- `SMA_EWMA_method.ipynb`: Simple Moving Average and Exponential Weighted Moving Average methods
-
-### Source Files (`/src`)
-- `visualize_data.py`: Utilities for data visualization
-- `utils.py`: General utility functions
-
-### Input Data Files
-- `metadata-gga-2024-10-23.csv`: Training data for GGA samples
-- `metadata-gga-metal-2024-10-23.csv`: Training data for GGA-metal samples
-- `metadata-gga-metal-hh-2024-10-23.csv`: Additional training data for GGA-metal samples
-- `sample/test_example.csv`: Test data for model prediction
-
-## Setup
-
-1. Install required dependencies:
+1. **Install dependencies:**
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Run the classification model:
-```bash
-python code/gga_classification_model.py
-```
-
-## Streamlit App Tutorial
-
-You can use the interactive dashboard for prediction, classification, and toxicity calculation.
-
-1. **Run the Streamlit app:**
+2. **Run the Streamlit dashboard:**
 ```bash
 streamlit run app.py
 ```
 
-2. **Using the dashboard:**
-   - Upload your `.txt` and `.xlsx` sample files using the upload section.
-   - Click the buttons to run LSTM prediction, classification, or toxicity calculation.
-   - Results and plots will be displayed directly in the browser.
+3. **Run classification model:**
+```bash
+python code/gga_classification_model.py
+```
 
-### Path Configuration
+## Project Overview
 
-- If you need to change file or model paths (for example, model files, input data), edit the relevant lines in `app.py` or `src/utils.py`.
-- Example in `app.py`:
-  ```python
-  model_path="model/LSTM Model/28_07_2025/enc-dec_lstm_model.h5"
-  ```
-- Make sure your paths are correct relative to the project root, or use absolute paths if needed.
+**Core Purpose**: Analyze dissolved oxygen degradation patterns to classify samples and calculate BOD metrics
+**Key Components**: Classification (RF/XGBoost), DO extraction (algorithm & ML), Time-series forecasting (LSTM/EMA)
+**Data Pipeline**: UTF-16 TXT → CSV metadata → Classification → Special point extraction → BOD calculation
 
----
+## Directory Structure
 
-## Output
-The script will generate:
-- Classification reports for both Random Forest and XGBoost models
-- Feature importance plots saved as 'feature_importance_comparison.png'
-- Predictions for test samples
-- Interactive dashboard results via Streamlit
+```
+VHL_Biology/
+├── code/                          # Core Python scripts
+│   ├── gga_classification_model.py # RF/XGBoost classifier (70+ features)
+│   ├── extract_DO_in.py           # Algorithm-based DO extremum extraction
+│   ├── extract_special_points.py  # Fixed-interval point extraction
+│   ├── ema_model.py               # EMA forecasting with RF regressor
+│   ├── process_txt_data.py        # UTF-16 TXT → CSV conversion
+│   ├── check_matching_name.py     # Fuzzy name matching (TXT/Excel)
+│   └── train extract special points/  # ML-based extraction
+│       ├── create_dataset.py
+│       ├── train_xgboost.py
+│       └── predict_and_extract.py
+├── src/
+│   ├── utils.py                   # Utilities (feature engineering, CatBoost, LSTM)
+│   └── visualize_data.py          # Time-series visualization
+├── tools/
+│   ├── derive_metadata_from_txt.py # Signal processing peak detection
+│   └── validate_metadata.py       # Tolerance-based validation
+├── model/                          # Trained models
+│   ├── LSTM Model/               # LSTM encoder-decoder variants
+│   ├── RF Model/                 # Random Forest models
+│   ├── catboost_model.cbm        # CatBoost classifier
+│   └── label_encoder_classes.npy
+├── notebooks/                      # Jupyter notebooks
+│   ├── ARIMA_1_0_Bio_VHL.ipynb   # ARIMA(1,1,5) forecasting
+│   ├── LSTM_Bio_VHL.ipynb        # LSTM lookback=7
+│   ├── LR_BIO_VHL.ipynb          # Linear Regression 8-12 lags
+│   └── SMA_EWMA_method.ipynb     # Moving average baselines
+├── data/
+│   ├── GGA/                      # GGA sample data
+│   ├── GGA-metal/                # GGA-metal sample data
+│   ├── BOD-Hieu/                 # BOD reference data
+│   └── metadata-gga-*.csv        # Extracted metadata
+├── docs/                          # Documentation
+└── app.py                         # Streamlit interactive dashboard
+```
+
+## Key Features
+
+- **Classification**: RF & XGBoost with 70-85 engineered features
+- **DO Extraction**: Savitzky-Golay filter (window 21-51, polyorder 2-9)
+- **Time-Series**: LSTM lookback 7 steps, EMA span 12
+- **Dashboard**: Real-time prediction, classification, toxicity calculation
+- **Validation**: Fuzzy name matching, tolerance-based metadata validation
+
+## Data Processing Pipeline
+
+```
+TXT files (UTF-16) → process_txt_data.py → metadata-gga-txt.csv
+                                                ↓
+    Algorithm path: extract_DO_in.py / extract_special_points.py
+    ML path: create_dataset.py → train_xgboost.py → predict_and_extract.py
+                                                ↓
+                        gga_classification_model.py (classification)
+                                                ↓
+                        app.py (Streamlit dashboard)
+```
+
+## Documentation
+
+- [Project Overview & Requirements](./docs/project-overview-pdr.md)
+- [Code Standards & Structure](./docs/code-standards.md)
+- [System Architecture](./docs/system-architecture.md)
+- [Codebase Summary](./docs/codebase-summary.md)
+- [Project Roadmap](./docs/project-roadmap.md)

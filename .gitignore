@@ -163,3 +163,7 @@ temp.xlsx
 temp.txt
 
 data/
+/.claude
+/docs
+/plans
+CLAUDE.md
