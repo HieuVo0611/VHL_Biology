@@ -1,0 +1,132 @@
+{
+  "date": "2026-03-22T11:39:09.520029",
+  "experiment": "balanced + deeper trees (depth=8)",
+  "params": {
+    "iterations": "300",
+    "learning_rate": "0.05",
+    "depth": "8",
+    "verbose": "0",
+    "random_state": "42",
+    "auto_class_weights": "Balanced"
+  },
+  "cv_accuracy": "0.7468 \u00b1 0.0418",
+  "test_accuracy": "0.7681",
+  "gga_recall": "50.0%",
+  "metal_recall": "88.8%",
+  "n_samples": 517,
+  "n_gga": 159,
+  "n_metal": 358,
+  "n_features": 68,
+  "feature_names": [
+    "mean_Doin (mV)",
+    "std_Doin (mV)",
+    "max_Doin (mV)",
+    "min_Doin (mV)",
+    "skew_Doin (mV)",
+    "kurtosis_Doin (mV)",
+    "q25_Doin (mV)",
+    "q50_Doin (mV)",
+    "q75_Doin (mV)",
+    "mean_DOmin (mV)",
+    "std_DOmin (mV)",
+    "max_DOmin (mV)",
+    "min_DOmin (mV)",
+    "skew_DOmin (mV)",
+    "kurtosis_DOmin (mV)",
+    "q25_DOmin (mV)",
+    "q50_DOmin (mV)",
+    "q75_DOmin (mV)",
+    "mean_DDO (mV)",
+    "std_DDO (mV)",
+    "max_DDO (mV)",
+    "min_DDO (mV)",
+    "skew_DDO (mV)",
+    "kurtosis_DDO (mV)",
+    "q25_DDO (mV)",
+    "q50_DDO (mV)",
+    "q75_DDO (mV)",
+    "mean_slope_Doin (mV)",
+    "total_abs_change_Doin (mV)",
+    "sign_changes_Doin (mV)",
+    "mean_slope_DOmin (mV)",
+    "total_abs_change_DOmin (mV)",
+    "sign_changes_DOmin (mV)",
+    "mean_slope_DDO (mV)",
+    "total_abs_change_DDO (mV)",
+    "sign_changes_DDO (mV)",
+    "mean_peak_diff",
+    "std_peak_diff",
+    "dominant_freq_amplitude_Doin (mV)",
+    "dominant_freq_Doin (mV)",
+    "spectral_power_Doin (mV)",
+    "spectral_entropy_Doin (mV)",
+    "dominant_freq_amplitude_DOmin (mV)",
+    "dominant_freq_DOmin (mV)",
+    "spectral_power_DOmin (mV)",
+    "spectral_entropy_DOmin (mV)",
+    "dominant_freq_amplitude_DDO (mV)",
+    "dominant_freq_DDO (mV)",
+    "spectral_power_DDO (mV)",
+    "spectral_entropy_DDO (mV)",
+    "mean_DDO_Doin_ratio",
+    "mean_DDO_DOmin_ratio",
+    "std_DDO_Doin_ratio",
+    "corr_Doin_DOmin",
+    "corr_Doin_DDO",
+    "high_peak_ratio",
+    "mean_dist_to_max_peak",
+    "close_peak_ratio",
+    "std_top_hpeak",
+    "num_cycles",
+    "mean_cycle_length",
+    "mean_cycle_amplitude",
+    "abnormal_cycle_ratio",
+    "short_interval_ratio",
+    "long_interval_ratio",
+    "coeff_variation_intervals",
+    "outlier_interval_ratio",
+    "num_peaks"
+  ],
+  "top_features": [
+    [
+      "skew_DDO (mV)",
+      7.665762105228409
+    ],
+    [
+      "kurtosis_DDO (mV)",
+      5.340600934957492
+    ],
+    [
+      "mean_peak_diff",
+      3.1219006536451284
+    ],
+    [
+      "mean_dist_to_max_peak",
+      2.941553613753087
+    ],
+    [
+      "std_DOmin (mV)",
+      2.8239607509619886
+    ],
+    [
+      "spectral_power_DOmin (mV)",
+      2.761668205785639
+    ],
+    [
+      "dominant_freq_amplitude_DOmin (mV)",
+      2.4790224323214636
+    ],
+    [
+      "skew_Doin (mV)",
+      2.3688701507404746
+    ],
+    [
+      "long_interval_ratio",
+      2.361609001098894
+    ],
+    [
+      "mean_cycle_length",
+      2.3034658271130626
+    ]
+  ]
+}

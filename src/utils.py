@@ -2,12 +2,48 @@
 from sklearn.preprocessing import LabelEncoder
 from catboost import CatBoostClassifier
 import numpy as np
+import pandas as pd
 import os
 import tensorflow as tf
 import plotly.express as px
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import load_model
 from sklearn.metrics import mean_squared_error
+
+from src.peak_extractor import extract_peaks_adaptive
+
+
+def extract_peaks_from_txt(txt_file_path):
+    """
+    Full pipeline: raw TXT file → adaptive peak extraction → DataFrame.
+
+    Input:  Single .txt file (UTF-16 tab-separated, columns: Time, DO)
+    Output: DataFrame [Tag, Doin (mV), No.peak, DOmin (mV), DDO (mV), Sample Name]
+            Compatible with catboost_inference_from_csv() and calculate_toxicity()
+    """
+    # Parse TXT file (same logic as process_and_predict_lstm)
+    try:
+        temp_data = pd.read_csv(txt_file_path, sep="\t", header=None,
+                                usecols=[0, 1], names=["Time", "DO"], encoding='utf-16')
+    except UnicodeError:
+        time_list, do_list = [], []
+        with open(txt_file_path, "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    time_list.append(float(parts[0].replace("\x00", "")))
+                    do_list.append(float(parts[1].replace("\x00", "")))
+        temp_data = pd.DataFrame({"Time": time_list, "DO": do_list})
+
+    sample_name = os.path.basename(txt_file_path).replace('.txt', '').strip()
+    DO = temp_data['DO'].values
+    Time = temp_data['Time'].values
+
+    # Run adaptive peak extraction (tuned algorithm with bias correction)
+    peaks_df = extract_peaks_adaptive(DO, Time, sample_name)
+
+    return peaks_df
+
 
 def extract_stages_from_metadata(df, sample_name):
     """
