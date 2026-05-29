@@ -16,6 +16,7 @@ from src.utils import (
     catboost_inference_from_csv,
     calculate_toxicity,
 )
+from src.phase_detector import update_phase_tags
 from src.export_excel import generate_excel_report
 
 # ── Page config ──────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ st.markdown("""
 # ── Session state defaults ───────────────────────────────────────────────────
 for key in ("peaks_df", "classification", "toxicity_df", "do_array",
             "sample_name", "signal_points", "do_min", "do_max",
-            "cls_name", "cls_pred", "cls_prob", "cls_error", "ran"):
+            "cls_name", "cls_pred", "cls_prob", "cls_error", "phase_error", "ran"):
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -166,6 +167,18 @@ if run_clicked and txt_file is not None:
                     st.session_state.cls_name = st.session_state.sample_name
                     st.session_state.cls_error = str(e)
 
+            # 3.5 Phase boundary detection (rewrite Tag column)
+            if len(peaks_df) > 0:
+                try:
+                    peaks_df = update_phase_tags(
+                        peaks_df,
+                        st.session_state.cls_pred or 'GGA'
+                    )
+                    st.session_state.peaks_df = peaks_df  # refresh stored df
+                except Exception as e:
+                    # Non-fatal: keep peaks_df as-is, toxicity will fallback to BOD10/BOD5
+                    st.session_state.phase_error = str(e)
+
             # 4. Toxicity
             if len(peaks_df) > 0:
                 st.session_state.toxicity_df = calculate_toxicity(peaks_df)
@@ -239,6 +252,18 @@ if st.session_state.ran and st.session_state.peaks_df is not None:
     st.markdown(f"**DDO Range:** {ddo_min:.2f} – {ddo_max:.2f} mV")
     st.markdown("---")
 
+    # Phase detection confidence warning
+    if "phase_confidence" in peaks_df.columns:
+        non_t = peaks_df[peaks_df["Tag"].isin(["phase1", "phase2"])]
+        if not non_t.empty:
+            mean_conf = float(non_t["phase_confidence"].mean())
+            if mean_conf < 0.6:
+                st.markdown(
+                    f'<p class="warn-msg">⚠️ Phase detection confidence thấp '
+                    f'({mean_conf:.2f}). Kết quả toxicity có thể không chính xác.</p>',
+                    unsafe_allow_html=True,
+                )
+
     # ── Signal chart ─────────────────────────────────────────────────────
     if st.session_state.do_array is not None:
         fig = go.Figure()
@@ -264,10 +289,14 @@ if st.session_state.ran and st.session_state.peaks_df is not None:
         display_df = peaks_df[["No.peak", "Tag", "Doin (mV)", "DOmin (mV)", "DDO (mV)"]].copy()
 
         def _color_tag(row):
-            tag = str(row.get("Tag", "")).strip()
-            if "BOD10" in tag:
-                return ["background-color: #FEF9C3"] * len(row)
-            return ["background-color: #DBEAFE"] * len(row)
+            tag = str(row.get("Tag", "")).strip().lower()
+            if tag == "phase1" or "bod10" in tag:
+                return ["background-color: #FEF9C3"] * len(row)  # yellow
+            if tag == "transition":
+                return ["background-color: #FECACA"] * len(row)  # light red
+            if tag == "phase2" or "bod5" in tag:
+                return ["background-color: #DBEAFE"] * len(row)  # blue
+            return [""] * len(row)
 
         styled = (
             display_df.style
