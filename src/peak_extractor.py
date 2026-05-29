@@ -386,7 +386,7 @@ def extract_peaks_adaptive(DO_raw, Time=None, sample_name=""):
             doin = find_plateau_adaptive(DO, min_pos, prev_min, cycle_length,
                                          norm_params, signal_range, is_hh_type)
             ddo = doin - domin if not np.isnan(doin) else np.nan
-            tag = 'BOD10' if i < 8 else 'BOD5'
+            tag = 'unknown'  # Tag set downstream by phase_detector.update_phase_tags()
             pos = int(Time[min_pos]) if Time is not None and len(Time) > min_pos else min_pos
 
             results.append({
