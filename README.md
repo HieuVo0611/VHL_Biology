@@ -1,6 +1,6 @@
 # VHL Biology Project
 
-**Version**: 1.1.0 | **Last Updated**: 2026-03-11 | **Status**: Production Ready
+**Version**: 1.2.0 | **Last Updated**: 2026-03-22 | **Status**: Production Ready
 
 Production ML system for dissolved oxygen (DO) analysis. Classifies biological samples (GGA vs GGA-metal), extracts DO peaks using adaptive two-pass algorithm, and predicts BOD metrics—entirely from TXT file uploads with no Excel dependency.
 
@@ -46,6 +46,13 @@ VHL_Biology/
 ├── tools/                         # Optimization & reporting utilities
 │   ├── derive_metadata_from_txt.py # Signal processing peak detection
 │   ├── validate_metadata.py       # Tolerance-based validation
+│   ├── validate-classifier-accuracy.py # 518-file classification validation
+│   ├── experiment-a-robust-features.py # Feature engineering experiments
+│   ├── experiment-b-augmentation.py    # Noise injection + oversampling
+│   ├── experiment-c-ensemble.py        # Multi-model ensemble comparison
+│   ├── experiment-d-aligned-training.py # Aligned training (algo-extracted)
+│   ├── experiment-e-aligned-noise.py   # Combined best approach
+│   ├── experiment-final-combine.py     # Final model training
 │   ├── analyze_metal_errors.py    # Per-peak error analysis (4 datasets)
 │   ├── test_metal_targeted.py     # 47 bias/param configurations
 │   ├── test_bias_finetune.py      # Bias fine-tuning (19 configs)
@@ -74,11 +81,12 @@ VHL_Biology/
 ## Key Features
 
 - **Peak Extraction**: Production adaptive algorithm (two-pass HH detection, +0.05mV bias correction, 485+ configs tuned)
-- **Classification**: CatBoost primary (0.81 accuracy), RF/XGBoost available
+- **Classification**: CatBoost primary (84.4% on 518 files, aligned training + noise augmentation + GGA oversampling)
+- **Phase Detection**: Hybrid 3-track ML/algorithm (RandomForest Metal/HH, constrained change-point GGA)
 - **Time-Series**: LSTM encoder-decoder (lookback=7, Huber loss)
-- **Toxicity**: DDO-based stage1 vs stage2 calculation
-- **Dashboard**: 5-step TXT-only pipeline (Upload → Peaks → LSTM → Classify → Toxicity)
-- **Validation**: Tolerance-based peak matching, fuzzy name matching
+- **Toxicity**: Phase1 vs phase2 calculation (transition rows excluded)
+- **Dashboard**: Summary Dashboard v2.0 (1-click TXT upload → auto-run → Summary cards + Excel export)
+- **Validation**: Tolerance-based peak matching, phase boundary ±1 = 98%+ (Metal/HH)
 
 ## Production Pipeline
 
@@ -93,7 +101,8 @@ extract_peaks_from_txt() [src/utils.py → src/peak_extractor.py]
 Split processing:
 ├─ process_and_predict_lstm() [LSTM prediction on raw time-series]
 ├─ catboost_inference_from_csv() [CatBoost classification on peaks]
-└─ calculate_toxicity() [DDO stage1 vs stage2 → toxicity %]
+├─ update_phase_tags() [phase1 / transition / phase2 detection]
+└─ calculate_toxicity() [DDO phase1 vs phase2 → toxicity %, transition skipped]
     ↓
 Results: Classification, Toxicity %, Forecasts
 ```
@@ -108,6 +117,17 @@ Classification: GGA (probability 78.4%)
 Toxicity: 5.31%
 Status: ALL 4 STEPS PASSED ✓
 ```
+
+## Classification Accuracy (CatBoost, 518-file validation, 2026-03-22)
+
+| Metric | Value |
+|--------|-------|
+| **Overall Accuracy** | **84.4%** (437/518) |
+| GGA Recall | 88.1% (140/159) |
+| Metal Recall | 82.7% (297/359) |
+
+**Training**: Algo-extracted peaks + Gaussian noise (s=0.08, 3x) + GGA oversample (45%)
+**Model**: CatBoost (iter=300, lr=0.05, depth=8, balanced weights), 81 features
 
 ## Extraction Accuracy (2-pass adaptive, tuned 485+ configs)
 
@@ -139,6 +159,7 @@ conda activate vhl
 
 ## Reports
 
+- Classification improvement: `plans/reports/classification-improvement-260322.md`
 - Vietnamese progress report: `plans/reports/BÁO CÁO SINH HỌC (11-03-2026).docx`
 - DOin bias correction & ML analysis: `plans/reports/optimization-260224-0921-doin-bias-correction-ml-analysis.md`
 - DOin accuracy ceiling audit: `plans/reports/evaluation-audit-260222-0956-doin-accuracy-ceiling.md`

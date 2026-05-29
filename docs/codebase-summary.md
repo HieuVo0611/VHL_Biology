@@ -1,7 +1,7 @@
 # VHL Biology - Codebase Summary
 
 **Last Updated**: 2026-03-22
-**Version**: 1.1.0
+**Version**: 1.2.0
 **Status**: Production-Ready (Full Pipeline Verified 2026-03-11)
 
 ## Project Overview
@@ -27,13 +27,19 @@ VHL_Biology/
 │   ├── peak_extractor.py              # Production adaptive peak extraction (448 lines)
 │   │                                  #  - Two-pass HH detection
 │   │                                  #  - Bias correction (+0.05mV non-HH, +0.04mV HH)
-│   │                                  #  - Tuned 485+ configurations, 85%+ accuracy
+│   │                                  #  - Tuned 485+ configurations, 93.0% @ 0.3mV test
+│   ├── phase_detector.py              # Phase boundary detection (135 lines)
+│   │                                  #  - Hybrid 3-track: RandomForest Metal/HH, constrained change-point GGA
+│   │                                  #  - Output: phase1 / transition / phase2 tags
+│   │                                  #  - Accuracy: Metal 98%, HH 98.6% (±1 boundary), GGA 84% (algorithm)
+│   ├── phase_features.py              # Phase feature extraction (85 lines)
+│   │                                  #  - 16 peak-derived features for Metal/HH RF models
 │   ├── utils.py                       # Core utilities (549 lines):
 │   │                                  #  - extract_peaks_from_txt() wrapper
-│   │                                  #  - Feature engineering (85+ features)
+│   │                                  #  - Feature engineering (81 features: 68 original + 13 robust)
 │   │                                  #  - CatBoost inference
 │   │                                  #  - LSTM prediction
-│   │                                  #  - Toxicity calculation
+│   │                                  #  - calculate_toxicity() [filters transition, prefers phase1/phase2]
 │   ├── export_excel.py                # Excel report generator (Summary Dashboard v2.0)
 │   │                                  #  - 2-sheet formatted workbook (Summary + Peaks)
 │   │                                  #  - openpyxl-based with styled headers/cells
@@ -42,10 +48,21 @@ VHL_Biology/
 │   ├── derive_metadata_from_txt.py    # Peak detection via signal processing
 │   │                                  #  (median filter + scipy find_peaks)
 │   ├── validate_metadata.py           # Tolerance-based validation
+│   ├── extract-phase-gt-from-excel.py # Extract phase GT from Excel color marking
+│   │                                  #  (yellow=phase1, white=transition/phase2)
+│   ├── train-phase-detector.py        # Train Metal + HH RandomForest models
+│   ├── validate-phase-detector.py     # Validate phase detector on GT
 │   ├── analyze_metal_errors.py        # Per-peak error analysis (4 datasets)
 │   ├── test_metal_targeted.py         # 47 bias/param config sweep
 │   ├── test_bias_finetune.py          # Bias fine-tuning (19 configs)
 │   ├── test_ml_correction.py          # ML correction experiment (GBR/RF vs uniform bias)
+│   ├── validate-classifier-accuracy.py # 518-file classification validation
+│   ├── experiment-a-robust-features.py # Feature engineering experiments
+│   ├── experiment-b-augmentation.py   # Noise injection + oversampling
+│   ├── experiment-c-ensemble.py       # Multi-model ensemble
+│   ├── experiment-d-aligned-training.py # Aligned training on algo-extracted peaks
+│   ├── experiment-e-aligned-noise.py  # Combined best approach
+│   ├── experiment-final-combine.py    # Final model training
 │   ├── generate_comprehensive_report.py # Word report generation
 │   └── generate-progress-report-260311.py # Vietnamese progress report (.docx)
 ├── model/                             # Trained models
@@ -54,6 +71,9 @@ VHL_Biology/
 │   ├── RF Model/                     # Random Forest classifiers
 │   │   └── 03012025/                 # Latest random_forest.pkl
 │   ├── catboost_model.cbm            # CatBoost classifier
+│   ├── catboost_training_metadata.json # Training metadata (features, params, accuracy)
+│   ├── phase_detector_metal.pkl      # RandomForest Metal phase detector (CV 93.2%)
+│   ├── phase_detector_hh.pkl         # RandomForest HH phase detector (CV 94.1%)
 │   └── label_encoder_classes.npy     # Class labels for encoding
 ├── notebooks/                        # Jupyter analysis notebooks
 │   ├── ARIMA_1_0_Bio_VHL.ipynb       # ARIMA(1,1,5) time series forecasting
@@ -64,6 +84,9 @@ VHL_Biology/
 │   ├── GGA/                          # GGA sample measurements (UTF-16 TXT)
 │   ├── GGA-metal/                    # GGA-metal sample measurements
 │   ├── BOD-Hieu/                     # BOD reference measurements
+│   ├── phase-gt-gga.csv              # GGA ground truth (25 samples, 446 peaks)
+│   ├── phase-gt-metal.csv            # Metal ground truth (100 samples, 1477 peaks)
+│   ├── phase-gt-hh.csv               # HH ground truth (432 samples, 6055 peaks)
 │   ├── metadata-gga-txt.csv          # Extracted metadata from TXT files
 │   ├── metadata-gga-*.csv            # Various metadata versions
 │   └── SPECIAL_POINTS_EXTRACTED.xlsx # Extracted special points results
@@ -110,20 +133,20 @@ DataFrame columns: [No.peak, Tag, Doin (mV), DOmin (mV), DDO (mV), Sample Name]
 **Purpose**: Classify samples as GGA or GGA-metal based on extracted peak features
 
 **Features**:
-- Random Forest classifier (70+ features)
-- XGBoost classifier (70+ features)
-- CatBoost classifier (production)
+- CatBoost classifier (production primary — trained on algo-extracted peaks with noise augmentation + GGA oversampling)
+- Random Forest classifier (81 features)
+- XGBoost classifier (81 features)
 - Ensemble voting mechanism
 - Feature importance analysis
 - Cross-validation (60/40 or 60/20/20 split)
 
-**Input**: Extracted peaks DataFrame or engineered features (85+)
+**Input**: Extracted peaks DataFrame or engineered features (81)
 
 **Key Metrics**:
-- Training data: 200+ samples with labels
-- Features: 70-85 engineered metrics
+- Training data: 518-file validation dataset
+- Features: 81 engineered metrics (68 original + 13 robust)
 - Output: Class labels with confidence scores
-- Accuracy: > 85%
+- Accuracy: 84.4% on 518-file validation (GGA=88.1%, Metal=82.7%)
 
 **Usage**:
 ```bash
@@ -183,11 +206,12 @@ python code/gga_classification_model.py
 
 ### 6. Feature Engineering (`/src/utils.py`)
 
-**85+ Engineered Features**:
+**81 Engineered Features (68 original + 13 robust)**:
 - Statistical: mean, std, min, max, median, quantiles
 - Time-series: autocorrelation, entropy, detrending
 - Domain-specific: DO degradation rate, half-life, plateau metrics
 - Aggregate: slope, acceleration, variability measures
+- Robust (13): outlier-resistant variants of key features
 
 **Additional Utilities**:
 - CatBoost model inference
@@ -212,6 +236,13 @@ python code/gga_classification_model.py
 - `tools/test_metal_targeted.py`: 47 bias/param config sweep
 - `tools/test_bias_finetune.py`: Bias fine-tuning (19 configs)
 - `tools/test_ml_correction.py`: ML correction experiment (GBR/RF vs uniform bias)
+- `tools/validate-classifier-accuracy.py`: 518-file classification validation
+- `tools/experiment-a-robust-features.py`: Feature engineering experiments
+- `tools/experiment-b-augmentation.py`: Noise injection + oversampling
+- `tools/experiment-c-ensemble.py`: Multi-model ensemble
+- `tools/experiment-d-aligned-training.py`: Aligned training on algo-extracted peaks
+- `tools/experiment-e-aligned-noise.py`: Combined best approach
+- `tools/experiment-final-combine.py`: Final model training
 - `tools/generate-progress-report-260311.py`: Vietnamese progress report (.docx)
 
 **Sample Matching** (`/code/check_matching_name.py`):
@@ -297,8 +328,9 @@ python code/gga_classification_model.py
 |---------|---------|---------|
 | scikit-learn | Latest | RF, SVM, preprocessing |
 | XGBoost | Latest | XGBoost classifier |
-| CatBoost | Latest | CatBoost classifier |
-| TensorFlow/Keras | 2.x+ | LSTM models |
+| CatBoost | 1.2.8 | CatBoost classifier (production) |
+| TensorFlow | 2.19.0 | LSTM models |
+| Keras | 3.10.0 | Deep learning API |
 | statsmodels | Latest | ARIMA, time-series |
 | pandas | 1.x+ | Data manipulation |
 | numpy | Latest | Numerical computing |
@@ -319,7 +351,7 @@ python code/gga_classification_model.py
 ### Metadata Structure (CSV)
 ```
 Fields: Timestamp, DO_value, Temperature, Conductivity, pH, ...
-        [85+ derived features]
+        [81 derived features (68 original + 13 robust)]
         [Sample_Name, Classification_Label]
 ```
 
@@ -357,7 +389,7 @@ Fields: Sample_ID, GGA_Probability, GGA_Metal_Probability, Predicted_Class,
 ## Performance Characteristics
 
 ### Classification
-- Accuracy: > 85% (RF and XGBoost)
+- Accuracy: 84.4% on 518-file validation (GGA=88.1%, Metal=82.7%)
 - Training time: < 1 hour (full dataset)
 - Inference time: < 500ms/sample
 

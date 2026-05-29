@@ -1,7 +1,7 @@
 # VHL Biology - System Architecture
 
 **Last Updated**: 2026-03-22
-**Version**: 1.1.0
+**Version**: 1.2.0
 **Project**: VHL Biology - DO Analysis & BOD Classification
 
 ## Architecture Overview
@@ -49,7 +49,7 @@ Output to Peak Extractor: Raw DO array + Time array
 
 ### 2. Feature Engineering Layer
 
-**Purpose**: Extract 85+ features for ML models
+**Purpose**: Extract 81 features for ML models
 
 **Location**: `/src/utils.py`
 
@@ -89,7 +89,7 @@ Domain Calculations
    ↓
 Scaling/Normalization (StandardScaler)
    ↓
-85+ Features Ready for ML
+81 Features Ready for ML
 ```
 
 ### 3. Classification Layer
@@ -100,18 +100,14 @@ Scaling/Normalization (StandardScaler)
 
 **Architecture**:
 ```
-85 Features (from Feature Engineering)
+81 Features (68 original + 13 robust features added 2026-03-22)
    ↓
-┌──────────────┬──────────────┐
-↓              ↓              ↓
-Random Forest  XGBoost     (Candidates for Ensemble)
-Model 1        Model 2
-   ↓              ↓
-Predictions  Predictions
-   ↓              ↓
-└──────────────┬──────────────┘
-   ↓
-Ensemble Voting (or weighted average)
+CatBoost Classifier (Primary)
+├─ iter=300, lr=0.05, depth=8
+├─ Balanced class weights
+├─ Trained on algo-extracted peaks (518 TXT files)
+├─ + Gaussian noise augmentation (s=0.08, 3x)
+└─ + GGA oversampling (45%)
    ↓
 Final Classification: GGA or GGA-metal
    ↓
@@ -119,10 +115,11 @@ Confidence Score (probability)
 ```
 
 **Key Parameters**:
-- Train/Test Split: 60/40 or 60/20/20
-- Cross-Validation: 5-fold
-- Random Forest: 100-200 estimators, max_depth=10
-- XGBoost: Learning rate 0.1, max_depth 5-7, n_estimators 100-300
+- Production model: CatBoost (iter=300, lr=0.05, depth=8, balanced weights)
+- Training data: 518 TXT files (algo-extracted peaks, not GT peaks)
+- Augmentation: Gaussian noise s=0.08 (3x) + GGA oversampling 45%
+- Accuracy: 84.4% on 518-file validation (GGA=88.1%, Metal=82.7%)
+- Key architectural improvement: aligned to algo-extracted peaks (was trained on GT peaks)
 
 **Output Schema**:
 ```json
@@ -182,7 +179,48 @@ Output: DataFrame [No.peak, Tag, Doin (mV), DOmin (mV), DDO (mV), Sample Name]
 - XGBoost trained on labeled examples
 - Higher accuracy but requires training data
 
-### 5. Special Points Extraction Layer
+### 5. Phase Boundary Detection Layer
+
+**Purpose**: Classify peaks as phase1 (stable), transition (rising/falling), or phase2 (new stable)
+
+**Location**: `/src/phase_detector.py` + `/src/phase_features.py`
+
+**Architecture**:
+```
+Extracted Peaks DataFrame
+   ↓
+Compute Peak Features (16 derived features)
+   ├─ Amplitude ratio, duration, position metrics
+   └─ Output: feature vector per peak
+   ↓
+Hybrid 3-Track Detection:
+   ├─ Track 1: HH Detection (DDO P90 > 12mV)
+   │  └─ RandomForest HH classifier (CV 94.1%, 6055 training peaks)
+   │     └─ If HH: phase1/phase2 output (98.6% ±1 accuracy)
+   │
+   ├─ Track 2: Metal Classification (sample class)
+   │  └─ RandomForest Metal classifier (CV 93.2%, 1477 training peaks)
+   │     └─ If Metal: phase1/phase2 output (98% ±1 accuracy)
+   │
+   └─ Track 3: GGA (Constrained Change-Point)
+      └─ Algorithm: find best boundary in [5,8] range
+         └─ Output: phase1/phase2 (84% ±1 accuracy)
+   ↓
+Output: phase1 / transition / phase2 tags per peak
+```
+
+**Ground Truth Data**:
+- GGA: 25 samples, 446 peaks (extracted from Excel yellow/white marking)
+- Metal: 100 samples, 1477 peaks (Excel color GT)
+- HH: 432 samples, 6055 peaks (Excel color GT)
+
+**Key Features** (16 total):
+- Amplitude metrics (DOin, DOmin, DDO, relative position)
+- Duration and spacing ratios
+- BOD10/BOD5 indicators
+- Cumulative DDO ratios
+
+### 6. Special Points Extraction Layer
 
 **Purpose**: Extract DO values at specific time intervals for BOD calculation
 
@@ -205,7 +243,7 @@ Output: DO values at each interval
 - `special_points_perfect.csv`: Exact interval extractions
 - `special_points_plateau_mean.csv`: Plateau mean values
 
-### 6. Forecasting Layer
+### 7. Forecasting Layer
 
 **Purpose**: Predict future DO values using time-series models
 
@@ -264,7 +302,7 @@ Prediction
 ```
 - Notebook: `LR_BIO_VHL.ipynb`
 
-### 7. Results & Dashboard Layer (Summary Dashboard v2.0)
+### 8. Results & Dashboard Layer (Summary Dashboard v2.0)
 
 **Purpose**: Present results in a single-page expert demo view with 1-click auto-run and exportable Excel report
 
@@ -279,18 +317,20 @@ Click "Run Analysis" → auto-execute full pipeline:
    │   └─ Output: peaks DataFrame
    ├─ catboost_inference_from_csv() [src/utils.py]
    │   └─ Output: GGA/GGA-metal classification + confidence
+   ├─ update_phase_tags() [src/phase_detector.py]
+   │   └─ Output: phase1 / transition / phase2 tags per peak
    └─ calculate_toxicity() [src/utils.py]
-       └─ Output: toxicity score + Stage 1/2 breakdown
+       └─ Output: toxicity score (phase1 vs phase2, transition skipped)
    ↓
 Summary Display (single page):
    ├─ Summary cards: peak count, classification, toxicity score, signal info
    ├─ Plotly interactive DO signal chart with peak markers
-   ├─ Color-coded peaks table (BOD10=yellow, BOD5=blue)
-   └─ Toxicity panel: Stage 1/2 detail + formula
+   ├─ Color-coded peaks table (phase1=yellow, transition=white, phase2=blue)
+   └─ Toxicity panel: Phase 1/2 detail + formula
    ↓
 Excel Export [src/export_excel.py]
    ├─ Sheet 1 — Summary: sample name, classification, toxicity, signal stats
-   └─ Sheet 2 — Peaks: full peaks table with BOD10/BOD5 color coding
+   └─ Sheet 2 — Peaks: full peaks table with phase tagging
 ```
 
 **Key Advantages over Legacy 5-Step**:
@@ -321,20 +361,25 @@ Step 3: LSTM Prediction (Independent)
 └─ Output: DO forecast
    ↓
 Step 4: Classification Pipeline (From Peaks)
-├─ peaks DataFrame → Feature engineering (85+ features)
-├─ CatBoost/RF/XGBoost inference
+├─ peaks DataFrame → Feature engineering (81 features)
+├─ CatBoost inference (primary)
 └─ Output: GGA/GGA-metal classification + confidence
    ↓
-Step 5: Toxicity Calculation
-├─ Domain-specific metrics from peaks
-└─ Output: Toxicity score
+Step 5: Phase Boundary Detection
+├─ peaks DataFrame → compute_peak_features() (16 features)
+├─ Hybrid 3-track: RandomForest Metal/HH, constrained change-point GGA
+└─ Output: phase1 / transition / phase2 tags per peak
+   ↓
+Step 6: Toxicity Calculation
+├─ Filtered peaks (transition excluded)
+└─ Output: Toxicity score (Phase 1 vs Phase 2)
    ↓
 Results Display (Summary Dashboard v2.0)
 ├─ Summary cards (peak count, classification, toxicity, signal info)
 ├─ Plotly DO signal chart with peak markers
-├─ Color-coded peaks table (BOD10=yellow, BOD5=blue)
-├─ Toxicity panel (Stage 1/2 detail + formula)
-└─ Excel export (src/export_excel.py — 2 sheets: Summary + Peaks)
+├─ Color-coded peaks table (phase1=yellow, transition=white, phase2=blue)
+├─ Toxicity panel (Phase 1/2 detail + formula)
+└─ Excel export (src/export_excel.py — 2 sheets: Summary + Peaks with phase tags)
 ```
 
 ### Classification Pipeline Detail (From Extracted Peaks)
@@ -343,28 +388,21 @@ Results Display (Summary Dashboard v2.0)
 Extracted Peaks DataFrame
    ├─ [No.peak, Tag, Doin (mV), DOmin (mV), DDO (mV), Sample Name]
    ↓
-Feature Engineering (85 features from peaks)
-   ├─ Statistical: mean, std, min, max of Doin, DOmin, DDO
-   ├─ Time-series: degradation rate, half-life, plateau metrics
-   └─ Domain-specific: derived from peak characteristics
+Feature Engineering (81 features from peaks)
+   ├─ 68 original features: mean, std, min, max of Doin, DOmin, DDO, degradation rate, half-life, plateau metrics
+   └─ 13 robust features added 2026-03-22
    ↓
-┌──────────────────────────────────┐
-│                                  │
-↓                                  ↓
-Random Forest              XGBoost/CatBoost
-├─ n_estimators: 100-200   ├─ learning_rate: 0.1
-├─ max_depth: 10           ├─ max_depth: 5-7
-├─ Accuracy: ~92%          ├─ Accuracy: ~94%
-   ↓                        ↓
-RF Predictions          XGB/CatBoost Predictions
-   └────────────┬───────────┘
-                ↓
-        Ensemble Voting / CatBoost Primary
-                ↓
-        Final Prediction
-        (GGA or GGA-metal)
-                ↓
-        Confidence Score
+CatBoost Classifier (Primary)
+├─ iter=300, lr=0.05, depth=8
+├─ Balanced class weights
+├─ Trained on algo-extracted peaks (not GT peaks) — key architectural improvement
+├─ Gaussian noise augmentation (s=0.08, 3x) + GGA oversampling (45%)
+└─ Accuracy: 84.4% on 518-file validation (GGA=88.1%, Metal=82.7%)
+   ↓
+Final Prediction
+(GGA or GGA-metal)
+   ↓
+Confidence Score
 ```
 
 **Key Change**: Classification now derives from algorithmically extracted peaks (not Excel metadata)
@@ -392,7 +430,7 @@ Time-Series Data
 ### Core Runtime
 | Component | Technology | Version |
 |-----------|-----------|---------|
-| Language | Python | 3.8+ |
+| Language | Python | 3.8+ (conda env `vhl`) |
 | Web Framework | Streamlit | Latest |
 | Notebooks | Jupyter | Latest |
 
@@ -401,8 +439,8 @@ Time-Series Data
 |---------|---------|---------|
 | scikit-learn | RF, preprocessing | Latest |
 | XGBoost | XGBoost classifier | Latest |
-| CatBoost | CatBoost model | Latest |
-| TensorFlow/Keras | LSTM models | 2.x+ |
+| CatBoost | CatBoost model | 1.2.8 |
+| TensorFlow/Keras | LSTM models | 2.19.0 / 3.10.0 |
 | statsmodels | ARIMA | Latest |
 | pandas | Data manipulation | 1.x+ |
 | numpy | Numerical computing | Latest |
@@ -438,7 +476,7 @@ model/
 Each model stored with:
 - **Hyperparameters**: JSON file with all parameters
 - **Training Log**: Date, accuracy, F1-score, cross-val scores
-- **Feature Schema**: List of 85 features used
+- **Feature Schema**: List of 81 features used
 - **Scaler Parameters**: Mean, std for StandardScaler
 
 ### Loading Models
@@ -499,8 +537,8 @@ Process Sample
 ### Processing Speed
 | Component | Time | Notes |
 |-----------|------|-------|
-| Feature Engineering | < 1 sec/sample | For 85 features |
-| Classification | < 500 ms/sample | Both RF and XGBoost |
+| Feature Engineering | < 1 sec/sample | For 81 features |
+| Classification | < 500 ms/sample | CatBoost primary |
 | DO Extraction (Algo) | < 1 sec/sample | Savitzky-Golay |
 | DO Extraction (ML) | < 200 ms/sample | XGBoost inference |
 | LSTM Prediction | < 200 ms/sample | Forward pass |
@@ -516,7 +554,7 @@ Process Sample
 ### Accuracy Metrics
 | Component | Metric | Target |
 |-----------|--------|--------|
-| Classification | Accuracy | > 85% |
+| Classification | Accuracy | 84.4% (518-file) |
 | DO Extraction (ML) | Accuracy vs Manual | > 95% |
 | Forecasting (LSTM) | MAE | < 2% DO deviation |
 | Feature Matching | Fuzzy Match Success | > 95% |
