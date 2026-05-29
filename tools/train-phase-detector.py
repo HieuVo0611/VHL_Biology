@@ -1,7 +1,7 @@
 """
 Train RandomForest phase detectors for Metal and HH.
-- Metal: GT sheets + 3x Gaussian noise (s=0.05) augmentation on DDO.
-- HH: GT sheets, no augmentation.
+No augmentation: noise augmentation was removed because it provided no benefit
+and previously caused GroupKFold leakage (noisy copies had distinct group names).
 Saves to model/phase_detector_{metal,hh}.pkl
 """
 import sys
@@ -22,8 +22,6 @@ GT_PATHS = {
     'metal': 'data/phase-gt-metal.csv',
     'hh': 'data/phase-gt-hh.csv',
 }
-NOISE_SIGMA = 0.05
-NOISE_COPIES = 3  # metal only
 
 RF_PARAMS = dict(
     n_estimators=200,
@@ -35,35 +33,21 @@ RF_PARAMS = dict(
 )
 
 
-def build_xy(gt_df, with_noise=False, noise_copies=0):
+def build_xy(gt_df):
     """
     Compute features per sample (group by Sample Name), stack X, y, groups.
-    If with_noise: replicate samples with Gaussian noise on DDO column.
     """
     X_parts, y_parts, g_parts = [], [], []
-
-    def _process(df_sample, sample_name):
-        renamed = df_sample.rename(columns={
+    for sn, group in gt_df.groupby('Sample Name'):
+        group = group.sort_values('peak_idx').reset_index(drop=True)
+        renamed = group.rename(columns={
             'Doin': 'Doin (mV)', 'DOmin': 'DOmin (mV)', 'DDO': 'DDO (mV)'
         })
         feats = compute_peak_features(renamed)
         X_parts.append(feats.to_numpy(dtype=float))
-        y_parts.append(df_sample['phase_label'].to_numpy(dtype=int))
-        g_parts.append(np.full(len(df_sample), sample_name))
-
-    for sn, group in gt_df.groupby('Sample Name'):
-        group = group.sort_values('peak_idx').reset_index(drop=True)
-        _process(group, sn)
-        if with_noise:
-            for k in range(noise_copies):
-                noisy = group.copy()
-                noisy['DDO'] = noisy['DDO'] + np.random.normal(0, NOISE_SIGMA, size=len(noisy))
-                _process(noisy, f'{sn}__noise{k}')
-
-    X = np.vstack(X_parts)
-    y = np.concatenate(y_parts)
-    groups = np.concatenate(g_parts)
-    return X, y, groups
+        y_parts.append(group['phase_label'].to_numpy(dtype=int))
+        g_parts.append(np.full(len(group), sn))
+    return np.vstack(X_parts), np.concatenate(y_parts), np.concatenate(g_parts)
 
 
 def cv_evaluate(X, y, groups, label):
@@ -90,8 +74,7 @@ def train_and_save(kind):
     df = df.dropna(subset=['DDO']).reset_index(drop=True)
     print(f'[{kind.upper()}] loaded {len(df)} peaks from {df["Sample Name"].nunique()} samples')
 
-    use_noise = (kind == 'metal')
-    X, y, groups = build_xy(df, with_noise=use_noise, noise_copies=NOISE_COPIES)
+    X, y, groups = build_xy(df)
     print(f'  X.shape={X.shape}, classes={np.bincount(y)}')
 
     print(f'[{kind.upper()}] 5-fold GroupKFold CV:')
