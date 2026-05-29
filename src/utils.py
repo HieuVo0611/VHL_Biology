@@ -71,42 +71,50 @@ def extract_stages_from_metadata(df, sample_name):
 
 def calculate_toxicity(metadata_df):
     """
-    Calculate toxicity for all samples in the metadata DataFrame.
+    Calculate toxicity per sample.
 
-    Parameters:
-    - metadata_df (pd.DataFrame): DataFrame containing columns 'Sample Name', 'Tag', 'Doin (mV)'
+    Prefers phase1/phase2 Tag values (new). Falls back to BOD10/BOD5 (old) if
+    no phase1/phase2 rows found, for backward compatibility.
 
-    Returns:
-    - pd.DataFrame: Summary table with columns:
-      ['Sample Name', 'Stage 1', 'Stage 2', 'Toxicity (%)']
+    Transition rows are skipped.
+
+    Returns DataFrame with columns: ['Sample Name', 'Stage 1', 'Stage 2', 'Toxicity (%)']
     """
     import pandas as pd
     results = []
 
     for sample_name in metadata_df['Sample Name'].unique():
-        # Extract stage tags from metadata
-        stage1, stage2 = extract_stages_from_metadata(metadata_df, sample_name)
+        df_sample = metadata_df[metadata_df['Sample Name'] == sample_name]
+        tags = df_sample['Tag'].astype(str).str.strip()
 
-        if stage1 and stage2:
-            # Filter rows for each stage
-            df_sample = metadata_df[metadata_df['Sample Name'] == sample_name]
-            df_stage1 = df_sample[df_sample['Tag'].str.strip() == stage1.strip()]
-            df_stage2 = df_sample[df_sample['Tag'].str.strip() == stage2.strip()]
-
-            if not df_stage1.empty and not df_stage2.empty:
-                doin1 = df_stage1['DDO (mV)'].mean()
-                doin2 = df_stage2['DDO (mV)'].mean()
-                toxicity = round((doin1 - doin2) / doin1 * 100, 2)
+        # New path: phase1 / phase2
+        df_p1 = df_sample[tags == 'phase1']
+        df_p2 = df_sample[tags == 'phase2']
+        if not df_p1.empty and not df_p2.empty:
+            stage1, stage2 = 'phase1', 'phase2'
+            ddo1 = df_p1['DDO (mV)'].mean()
+            ddo2 = df_p2['DDO (mV)'].mean()
+            toxicity = round((ddo1 - ddo2) / ddo1 * 100, 2)
+        else:
+            # Fallback: legacy BOD10/BOD5 detection by first 2 unique tags
+            stage1, stage2 = extract_stages_from_metadata(metadata_df, sample_name)
+            if stage1 and stage2:
+                df_stage1 = df_sample[tags == stage1.strip()]
+                df_stage2 = df_sample[tags == stage2.strip()]
+                if not df_stage1.empty and not df_stage2.empty:
+                    ddo1 = df_stage1['DDO (mV)'].mean()
+                    ddo2 = df_stage2['DDO (mV)'].mean()
+                    toxicity = round((ddo1 - ddo2) / ddo1 * 100, 2)
+                else:
+                    toxicity = None
             else:
                 toxicity = None
-        else:
-            toxicity = None
 
         results.append({
             'Sample Name': sample_name,
             'Stage 1': stage1,
             'Stage 2': stage2,
-            'Toxicity (%)': toxicity
+            'Toxicity (%)': toxicity,
         })
 
     return pd.DataFrame(results)
@@ -295,7 +303,34 @@ def aggregate_features(df, has_label=True):
         
         # 9. Number of peaks
         sample_features['num_peaks'] = len(group)
-        
+
+        # 10. Robust ratio features (invariant to absolute mV shift)
+        doin = group['Doin (mV)']
+        domin = group['DOmin (mV)']
+        ddo = group['DDO (mV)']
+
+        doin_range = doin.max() - doin.min()
+        sample_features['DDO_to_doin_range_ratio'] = ddo.mean() / (doin_range + 1e-6)
+        sample_features['DOmin_Doin_std_ratio'] = domin.std() / (doin.std() + 1e-6) if len(group) > 1 else 0
+        sample_features['DDO_coeff_variation'] = ddo.std() / (ddo.mean() + 1e-6) if len(group) > 1 else 0
+        sample_features['normalized_DDO_mean'] = (ddo.mean() - ddo.median()) / (ddo.std() + 1e-6) if len(group) > 1 else 0
+
+        # 11. Distribution shape features (robust to shift)
+        sample_features['peak_spacing_regularity'] = peak_diffs.std() / (peak_diffs.mean() + 1e-6) if peak_diffs.mean() != 0 and len(peak_diffs) > 1 else 0
+        sample_features['DDO_iqr'] = ddo.quantile(0.75) - ddo.quantile(0.25) if len(ddo) > 3 else 0
+        sample_features['DDO_range_ratio'] = (ddo.max() - ddo.min()) / (ddo.mean() + 1e-6) if len(ddo) > 0 else 0
+
+        # 12. Count/categorical features (not affected by mV error)
+        ddo_median = ddo.median()
+        sample_features['n_high_DDO_peaks'] = int(np.sum(ddo > ddo_median * 1.5)) if ddo_median > 0 else 0
+        sample_features['n_low_DDO_peaks'] = int(np.sum(ddo < ddo_median * 0.5)) if ddo_median > 0 else 0
+
+        tag_counts = group['Tag'].value_counts(normalize=True)
+        sample_features['BOD_tag_ratio_5'] = tag_counts.get('BOD5', 0)
+        sample_features['BOD_tag_ratio_10'] = tag_counts.get('BOD10', 0)
+        sample_features['BOD_tag_ratio_15'] = tag_counts.get('BOD15', 0)
+        sample_features['peak_density'] = len(group) / (group['No.peak'].max() + 1e-6) if len(group) > 0 else 0
+
         # Add label if exists
         if has_label:
             sample_features['label'] = group['label'].iloc[0]
