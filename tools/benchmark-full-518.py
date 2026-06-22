@@ -86,6 +86,57 @@ def _write_sheet2(wb, records):
     ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
 
 
+def _write_sheet3(wb, records):
+    """Confidence distribution — shows accuracy per confidence bucket."""
+    ws = wb.create_sheet("Distribution")
+
+    cols = ["Confidence Range", "Total Samples", "Correct", "Wrong", "Accuracy %"]
+    _header_row(ws, cols)
+
+    buckets = [(0,50), (50,60), (60,70), (70,80), (80,90), (90,101)]
+    labels  = ["0–50%", "50–60%", "60–70%", "70–80%", "80–90%", "90–100%"]
+
+    df = pd.DataFrame(records)
+    df_valid = df[df["error_msg"] == ""]
+
+    for row_idx, ((lo, hi), label) in enumerate(zip(buckets, labels), start=2):
+        subset  = df_valid[(df_valid["confidence_pct"] >= lo) & (df_valid["confidence_pct"] < hi)]
+        total   = len(subset)
+        correct = int(subset["correct"].sum()) if total > 0 else 0
+        wrong   = total - correct
+        acc     = round(correct / total * 100, 1) if total > 0 else 0.0
+
+        if acc >= 80:
+            fill = PatternFill("solid", fgColor="C6EFCE")
+        elif acc >= 60:
+            fill = PatternFill("solid", fgColor="FFEB9C")
+        else:
+            fill = PatternFill("solid", fgColor="FFC7CE")
+
+        for col_idx, val in enumerate([label, total, correct, wrong, acc], start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.fill      = fill
+            cell.border    = THIN_BORDER
+            cell.alignment = ALIGN_CENTER
+
+    # Totals row
+    total_all   = len(df_valid)
+    correct_all = int(df_valid["correct"].sum()) if total_all > 0 else 0
+    row = ws.max_row + 1
+    for col_idx, val in enumerate(
+        ["TOTAL", total_all, correct_all, total_all - correct_all,
+         round(correct_all / total_all * 100, 1) if total_all > 0 else 0],
+        start=1
+    ):
+        cell = ws.cell(row=row, column=col_idx, value=val)
+        cell.font      = FONT_BOLD
+        cell.border    = THIN_BORDER
+        cell.alignment = ALIGN_CENTER
+
+    for i, w in enumerate([16, 16, 12, 12, 14], start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+
 def find_txt_files(base_dir):
     """Recursively find all .txt files under base_dir."""
     results = []
@@ -161,6 +212,7 @@ if __name__ == "__main__":
     wb = Workbook()
     wb.remove(wb.active)   # remove default empty sheet
     _write_sheet2(wb, records)
+    _write_sheet3(wb, records)
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     wb.save(OUTPUT_PATH)
     print(f"Saved: {OUTPUT_PATH}")
