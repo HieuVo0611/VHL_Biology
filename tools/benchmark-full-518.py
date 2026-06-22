@@ -137,6 +137,75 @@ def _write_sheet3(wb, records):
         ws.column_dimensions[get_column_letter(i)].width = w
 
 
+def _write_sheet1(wb, records):
+    """Summary sheet — aggregate accuracy and timing stats."""
+    ws = wb.create_sheet("Summary", 0)
+
+    df = pd.DataFrame(records)
+    df_valid   = df[df["error_msg"] == ""]
+    df_gga     = df_valid[df_valid["true_label"] == "gga"]
+    df_metal   = df_valid[df_valid["true_label"] == "gga-metal"]
+    df_correct = df_valid[df_valid["correct"] == True]
+    df_wrong   = df_valid[df_valid["correct"] == False]
+
+    n_total   = len(df_valid)
+    n_correct = int(df_valid["correct"].sum())
+    n_errors  = len(df[df["error_msg"] != ""])
+
+    def _row(ws, row, label, value, fill=None):
+        lc = ws.cell(row=row, column=1, value=label)
+        vc = ws.cell(row=row, column=2, value=value)
+        lc.font = FONT_BOLD
+        lc.border = vc.border = THIN_BORDER
+        lc.alignment = vc.alignment = Alignment(vertical="center")
+        if fill:
+            lc.fill = vc.fill = fill
+
+    # Title row
+    ws.merge_cells("A1:B1")
+    title = ws.cell(row=1, column=1, value="VHL Biology — Full 518-Sample Benchmark")
+    title.font      = Font(color="FFFFFF", bold=True, size=14)
+    title.fill      = FILL_HEADER
+    title.alignment = ALIGN_CENTER
+
+    row = 2
+    _row(ws, row, "Total samples processed", n_total);                       row += 1
+    _row(ws, row, "Errors / skipped",         n_errors);                     row += 1
+    _row(ws, row, "Correct",  n_correct,       FILL_CORRECT);                row += 1
+    _row(ws, row, "Wrong",    n_total - n_correct, FILL_WRONG);              row += 1
+    _row(ws, row, "Overall Accuracy %",
+         f"{n_correct/n_total*100:.1f}%" if n_total > 0 else "N/A");        row += 1
+
+    row += 1  # spacer
+    _row(ws, row, "--- Per-class ---", "");                                   row += 1
+
+    gga_acc   = df_gga["correct"].mean()   * 100 if len(df_gga)   > 0 else 0
+    metal_acc = df_metal["correct"].mean() * 100 if len(df_metal) > 0 else 0
+    _row(ws, row, f"GGA Accuracy   ({len(df_gga)} samples)",
+         f"{gga_acc:.1f}%");                                                  row += 1
+    _row(ws, row, f"Metal Accuracy ({len(df_metal)} samples)",
+         f"{metal_acc:.1f}%");                                                row += 1
+
+    row += 1  # spacer
+    _row(ws, row, "--- Confidence ---", "");                                  row += 1
+    avg_conf_correct = df_correct["confidence_pct"].mean() if len(df_correct) > 0 else 0
+    avg_conf_wrong   = df_wrong["confidence_pct"].mean()   if len(df_wrong)   > 0 else 0
+    _row(ws, row, "Avg confidence (correct)", f"{avg_conf_correct:.1f}%");   row += 1
+    _row(ws, row, "Avg confidence (wrong)",   f"{avg_conf_wrong:.1f}%");     row += 1
+
+    row += 1  # spacer
+    _row(ws, row, "--- Avg Timing (per sample) ---", "");                    row += 1
+    for step, col in [("Extract",  "t_extract"),
+                      ("Classify", "t_classify"),
+                      ("Phase",    "t_phase"),
+                      ("Total",    "t_total")]:
+        avg = df_valid[col].mean() if len(df_valid) > 0 else 0
+        _row(ws, row, f"Avg {step} time", f"{avg:.3f}s");                   row += 1
+
+    ws.column_dimensions["A"].width = 38
+    ws.column_dimensions["B"].width = 20
+
+
 def find_txt_files(base_dir):
     """Recursively find all .txt files under base_dir."""
     results = []
@@ -213,6 +282,7 @@ if __name__ == "__main__":
     wb.remove(wb.active)   # remove default empty sheet
     _write_sheet2(wb, records)
     _write_sheet3(wb, records)
+    _write_sheet1(wb, records)
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     wb.save(OUTPUT_PATH)
     print(f"Saved: {OUTPUT_PATH}")
