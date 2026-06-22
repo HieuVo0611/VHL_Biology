@@ -6,6 +6,21 @@ Output: plans/reports/benchmark-260622-full-518.xlsx
 import sys, os, time
 import pandas as pd
 from tqdm import tqdm
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+FILL_CORRECT = PatternFill("solid", fgColor="C6EFCE")
+FILL_WRONG   = PatternFill("solid", fgColor="FFC7CE")
+FILL_ERROR   = PatternFill("solid", fgColor="FFEB9C")
+FILL_HEADER  = PatternFill("solid", fgColor="1F4E79")
+FONT_HEADER  = Font(color="FFFFFF", bold=True, size=10)
+FONT_BOLD    = Font(bold=True)
+ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
+THIN_BORDER  = Border(
+    left=Side(style="thin"), right=Side(style="thin"),
+    top=Side(style="thin"),  bottom=Side(style="thin"),
+)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,6 +32,58 @@ LABEL_ENCODER_PATH = "model/label_encoder_classes.npy"
 GGA_DIR            = "data/GGA/File txt"
 METAL_DIR          = "data/GGA-metal/File txt"
 OUTPUT_PATH        = "plans/reports/benchmark-260622-full-518.xlsx"
+
+
+def _header_row(ws, cols):
+    for col_idx, col_name in enumerate(cols, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.fill      = FILL_HEADER
+        cell.font      = FONT_HEADER
+        cell.alignment = ALIGN_CENTER
+        cell.border    = THIN_BORDER
+
+
+def _write_sheet2(wb, records):
+    ws = wb.create_sheet("Per-Sample Detail")
+    cols = [
+        "sample_name", "true_label", "pred_label", "correct",
+        "confidence_%", "n_peaks",
+        "n_phase1", "n_transition", "n_phase2",
+        "t_extract_s", "t_classify_s", "t_phase_s", "t_total_s",
+        "error_msg",
+    ]
+    _header_row(ws, cols)
+
+    sorted_records = sorted(records, key=lambda r: r["confidence_pct"])
+
+    for row_idx, rec in enumerate(sorted_records, start=2):
+        values = [
+            rec["sample_name"], rec["true_label"], rec["pred_label"],
+            "✓" if rec["correct"] else ("ERR" if rec["error_msg"] else "✗"),
+            rec["confidence_pct"], rec["n_peaks"],
+            rec["n_phase1"], rec["n_transition"], rec["n_phase2"],
+            rec["t_extract"], rec["t_classify"], rec["t_phase"], rec["t_total"],
+            rec["error_msg"],
+        ]
+        if rec["error_msg"]:
+            fill = FILL_ERROR
+        elif rec["correct"]:
+            fill = FILL_CORRECT
+        else:
+            fill = FILL_WRONG
+
+        for col_idx, val in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.fill      = fill
+            cell.border    = THIN_BORDER
+            cell.alignment = Alignment(vertical="center")
+
+    widths = [45, 12, 12, 8, 14, 8, 10, 14, 10, 12, 13, 11, 11, 40]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(cols))}1"
 
 
 def find_txt_files(base_dir):
@@ -91,5 +158,9 @@ def run_benchmark():
 if __name__ == "__main__":
     records = run_benchmark()
     print(f"\nCollected {len(records)} records")
-    for r in records[:3]:
-        print(r)
+    wb = Workbook()
+    wb.remove(wb.active)   # remove default empty sheet
+    _write_sheet2(wb, records)
+    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    wb.save(OUTPUT_PATH)
+    print(f"Saved: {OUTPUT_PATH}")
