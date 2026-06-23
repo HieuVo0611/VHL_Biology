@@ -385,7 +385,8 @@ def render_step_2():
     st.markdown(
         '<p class="step-desc">'
         'Mô hình <b>CatBoost</b> (81 đặc trưng, accuracy 84.4% trên 518 file) phân loại '
-        'mẫu thành <b>GGA</b> (nước thải sinh hoạt) hoặc <b>GGA-Metal</b> (có kim loại nặng). '
+        'mẫu thành <b>Organic Pollution</b> (nước thải sinh hoạt) hoặc '
+        '<b>Metal Pollution</b> (có kim loại nặng). '
         'Nhãn phân loại này ảnh hưởng trực tiếp đến thuật toán phát hiện pha ở bước tiếp theo.'
         '</p>',
         unsafe_allow_html=True,
@@ -430,6 +431,7 @@ def render_step_2():
             st.markdown(f'<span class="elapsed-badge">⏱ {elapsed}s</span>', unsafe_allow_html=True)
 
         cls = st.session_state.cls_pred or "—"
+        cls_display = _LABEL_DISPLAY.get(cls, cls)
         prob = st.session_state.cls_prob or 0.0
         is_err = cls == "Lỗi"
         bg = "linear-gradient(135deg,#fff7ed,#ffedd5)" if is_err else "linear-gradient(135deg,#f0fdf4,#dcfce7)"
@@ -443,7 +445,7 @@ def render_step_2():
                 KẾT QUẢ PHÂN LOẠI
             </div>
             <div style="font-size:64px;font-weight:800;color:{text_color};line-height:1.1;">
-                {cls}
+                {cls_display}
             </div>
             <div style="font-size:22px;color:#94a3b8;margin-top:10px;">
                 {prob * 100:.1f}% xác suất
@@ -539,8 +541,19 @@ def render_step_3():
                   .format({"Doin (mV)": "{:.2f}", "DOmin (mV)": "{:.2f}", "DDO (mV)": "{:.2f}"}))
         st.dataframe(styled, use_container_width=True, height=380)
 
+    is_organic = (st.session_state.cls_pred or "").strip() == "gga"
     st.markdown("---")
-    _nav(back=2, nxt=4)
+    if is_organic:
+        bod_enabled = st.checkbox(
+            "📊 Tính nồng độ BOD từ DDO (tùy chọn)",
+            value=st.session_state.bod_enabled,
+            help="Nhập 2 điểm hiệu chuẩn BOD↔DDO để suy ra nồng độ BOD của từng pha",
+            key="chk_bod",
+        )
+        st.session_state.bod_enabled = bod_enabled
+        _nav(back=2, nxt=4 if bod_enabled else 5)
+    else:
+        _nav(back=2, nxt=4)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
