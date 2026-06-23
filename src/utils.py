@@ -553,8 +553,35 @@ def process_and_predict_lstm(txt_file_path, model_path, lookback=7, train_size=0
 
     return fig
 
+def calculate_bod_from_calibration(
+    ddo_phase1: float,
+    ddo_phase2: float,
+    bod1_cal: float,
+    ddo1_cal: float,
+    bod2_cal: float,
+    ddo2_cal: float,
+) -> dict:
+    """
+    Fit linear DDO = a*BOD + b from 2 calibration points,
+    then invert to compute BOD from pipeline DDO values.
+
+    Raises ValueError if bod2_cal == bod1_cal (zero slope / division by zero).
+    Returns dict with keys: a, b, bod_phase1, bod_phase2.
+    """
+    if bod2_cal == bod1_cal:
+        raise ValueError("BOD₁ và BOD₂ hiệu chuẩn phải khác nhau")
+    a = (ddo2_cal - ddo1_cal) / (bod2_cal - bod1_cal)
+    b = ddo1_cal - a * bod1_cal
+    return {
+        "a":          round(a, 6),
+        "b":          round(b, 6),
+        "bod_phase1": round((ddo_phase1 - b) / a, 3),
+        "bod_phase2": round((ddo_phase2 - b) / a, 3),
+    }
+
+
 if __name__ == "__main__":
-    
+
     import pandas as pd
     import numpy as np
     import plotly.express as px
