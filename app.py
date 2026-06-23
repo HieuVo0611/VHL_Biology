@@ -752,32 +752,58 @@ def render_step_5():
     s1_ddo    = st.session_state.s1_ddo
     s2_ddo    = st.session_state.s2_ddo
 
-    # ── 4 metric cards ────────────────────────────────────────────────────────
+    # ── metric cards ─────────────────────────────────────────────────────────
     tag_counts = peaks_df["Tag"].value_counts()
     bod_str = " · ".join(f"{cnt} {tag}" for tag, cnt in tag_counts.items())
 
-    c1, c2, c3, c4 = st.columns(4)
+    is_organic = (st.session_state.cls_pred or "") == "gga"
+    has_bod    = is_organic and st.session_state.bod_phase1 is not None
+    cls_display = _LABEL_DISPLAY.get(st.session_state.cls_pred or "", st.session_state.cls_pred or "—")
+
+    if has_bod:
+        c1, c2, c3, c4, c5 = st.columns(5)
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c5 = None
+
     with c1:
         st.metric("Số Peak", len(peaks_df))
         st.caption(bod_str)
     with c2:
-        st.metric("Phân loại", st.session_state.cls_pred or "—",
+        st.metric("Phân loại", cls_display,
                   help=f"{(st.session_state.cls_prob or 0) * 100:.1f}% xác suất")
         st.caption(f"{(st.session_state.cls_prob or 0) * 100:.1f}% xác suất")
     with c3:
-        st.metric("Độ độc", f"{tox_val}%" if tox_val is not None else "N/A")
-        if stage1 and stage2:
-            st.caption(f"{stage1} → {stage2}")
-    with c4:
-        st.metric("Tín hiệu", f"{st.session_state.signal_points:,} pts")
-        st.caption(f"{st.session_state.do_min:.2f} – {st.session_state.do_max:.2f} mV")
+        if has_bod:
+            st.metric("BOD Phase 1", f"{st.session_state.bod_phase1:.3f} mg/L")
+        elif not is_organic:
+            st.metric("Độ độc", f"{tox_val}%" if tox_val is not None else "N/A")
+            if stage1 and stage2:
+                st.caption(f"{stage1} → {stage2}")
+        else:
+            st.metric("BOD", "—")
+            st.caption("Không tính (tùy chọn bỏ qua)")
+    if has_bod and c4 is not None:
+        with c4:
+            st.metric("BOD Phase 2", f"{st.session_state.bod_phase2:.3f} mg/L")
+        with c5:
+            st.metric("Tín hiệu", f"{st.session_state.signal_points:,} pts")
+            st.caption(f"{st.session_state.do_min:.2f} – {st.session_state.do_max:.2f} mV")
+    else:
+        with c4:
+            st.metric("Tín hiệu", f"{st.session_state.signal_points:,} pts")
+            st.caption(f"{st.session_state.do_min:.2f} – {st.session_state.do_max:.2f} mV")
 
     st.markdown("---")
 
     # ── Timeline ──────────────────────────────────────────────────────────────
     st.markdown("### ⏱ Thời gian xử lý")
-    step_name_map = {1: "Peak Extraction", 2: "Classification",
-                     3: "Phase Detection", 4: "Toxicity"}
+    step_name_map = {
+        1: "Peak Extraction",
+        2: "Classification",
+        3: "Phase Detection",
+        4: "BOD Concentration" if is_organic else "Toxicity",
+    }
     rows, total = [], 0.0
     for i, name in step_name_map.items():
         t = st.session_state.step_times.get(i, 0.0)
@@ -792,9 +818,9 @@ def render_step_5():
     excel_buf = generate_excel_report(
         sample_name=st.session_state.sample_name or "Unknown",
         peaks_df=peaks_df,
-        classification=st.session_state.cls_pred or "N/A",
+        classification=_LABEL_DISPLAY.get(st.session_state.cls_pred or "", st.session_state.cls_pred or "N/A"),
         probability=st.session_state.cls_prob or 0.0,
-        toxicity_pct=tox_val,
+        toxicity_pct=tox_val if not is_organic else None,
         stage1_tag=stage1,
         stage1_ddo_avg=s1_ddo,
         stage2_tag=stage2,
@@ -802,6 +828,8 @@ def render_step_5():
         signal_points=st.session_state.signal_points or 0,
         do_min=st.session_state.do_min or 0.0,
         do_max=st.session_state.do_max or 0.0,
+        bod_phase1=st.session_state.bod_phase1,
+        bod_phase2=st.session_state.bod_phase2,
     )
 
     dl_col, reset_col = st.columns(2)
