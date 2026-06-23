@@ -1,378 +1,755 @@
 """
 Module: app.py
-Purpose: Expert Demo Summary Dashboard — 1-click pipeline with Excel export.
-Version: 2.0.0 (Summary Dashboard)
+Purpose: VHL Biology — step-by-step analysis wizard. One step per screen,
+         time elapsed per step, back/forward navigation.
+Version: 2.2.0
 """
 import os
 import tempfile
+import time
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from src.utils import (
-    extract_peaks_from_txt,
-    catboost_inference_from_csv,
-    calculate_toxicity,
-)
+from src.utils import extract_peaks_from_txt, catboost_inference_from_csv, calculate_toxicity
 from src.phase_detector import update_phase_tags
 from src.export_excel import generate_excel_report
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="VHL Biology Analysis", layout="wide", page_icon="🔬")
 
-# ── CSS ──────────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
+# ── CSS ───────────────────────────────────────────────────────────────────────
+st.markdown("""<style>
     .main { background-color: #f0f2f5; }
-    .block-container { padding-top: 1rem; }
+    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
     div[data-testid="stMetric"] {
         background: linear-gradient(135deg, #f8fafc, #f1f5f9);
         border: 1px solid #e2e8f0;
         border-radius: 12px;
         padding: 12px 16px;
     }
-    .header-bar {
-        background: linear-gradient(135deg, #1a365d, #2d5d8a);
-        padding: 20px 32px;
-        border-radius: 12px;
+    .step-title { font-size: 26px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+    .step-desc  { font-size: 15px; color: #64748b; margin-bottom: 20px; line-height: 1.6; }
+    .elapsed-badge {
+        display: inline-block;
+        background: #dcfce7;
+        color: #15803d;
+        border: 1px solid #86efac;
+        border-radius: 20px;
+        padding: 3px 12px;
+        font-size: 13px;
+        font-weight: 600;
         margin-bottom: 16px;
     }
-    .header-title { color: white; font-size: 24px; font-weight: 700; margin: 0; }
-    .header-sub { color: rgba(255,255,255,0.7); font-size: 14px; margin-top: 4px; }
-    .success-msg { color: #16a34a; font-weight: 600; }
-    .error-msg { color: #dc2626; font-weight: 600; }
-    .warn-msg { color: #ca8a04; font-weight: 600; }
-    .stage-card {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 14px;
-        margin-bottom: 10px;
-    }
-    .tox-result {
-        background: linear-gradient(135deg, #fefce8, #fef9c3);
-        border: 2px solid #fbbf24;
-        border-radius: 12px;
-        padding: 16px;
-        text-align: center;
-    }
-</style>
-""", unsafe_allow_html=True)
+</style>""", unsafe_allow_html=True)
 
-# ── Header ───────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="header-bar">
-    <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
-            <p class="header-title">🔬 VHL Biology Analysis</p>
-            <p class="header-sub">Phân tích DO & Phân loại mẫu sinh học</p>
-        </div>
-        <div style="background:rgba(255,255,255,0.15);padding:6px 14px;border-radius:8px;color:white;font-size:13px;">
-            v1.1.0
-        </div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# ── Session state defaults ────────────────────────────────────────────────────
+_DEFAULTS: dict = dict(
+    step=0,
+    file_bytes=None, sample_name=None,
+    do_array=None, signal_points=None, do_min=None, do_max=None,
+    peaks_df=None,
+    cls_pred=None, cls_prob=None, cls_error=None,
+    phase_error=None,
+    toxicity_df=None,
+    tox_val=None, stage1_tag=None, stage2_tag=None, s1_ddo=None, s2_ddo=None,
+    bod_enabled=False,
+    bod_phase1=None,
+    bod_phase2=None,
+    bod_a=None,
+    bod_b=None,
+    step_times={},
+)
+for k, v in _DEFAULTS.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-# ── Session state defaults ───────────────────────────────────────────────────
-for key in ("peaks_df", "classification", "toxicity_df", "do_array",
-            "sample_name", "signal_points", "do_min", "do_max",
-            "cls_name", "cls_pred", "cls_prob", "cls_error", "phase_error", "ran"):
-    if key not in st.session_state:
-        st.session_state[key] = None
+# ── Navigation helpers ────────────────────────────────────────────────────────
+def _go(n: int):
+    st.session_state.step = n
 
+def _reset():
+    for k, v in _DEFAULTS.items():
+        st.session_state[k] = {} if k == "step_times" else v
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  UPLOAD + RUN
-# ═══════════════════════════════════════════════════════════════════════════════
-upload_col, btn_col = st.columns([5, 1])
-with upload_col:
-    txt_file = st.file_uploader(
-        "Upload file .txt (UTF-16, cột Time/DO)",
-        type=["txt"],
-        label_visibility="collapsed",
+def _nav(back=None, nxt=None, nxt_label="Tiếp theo →", nxt_disabled=False):
+    # Explicit unique keys prevent Streamlit from confusing buttons across steps
+    cols = st.columns([1, 5, 1])
+    with cols[0]:
+        if back is not None:
+            if st.button("← Quay lại", key=f"btn_back_{back}_{nxt}",
+                         use_container_width=True):
+                st.session_state.step = back
+                st.rerun()
+    with cols[2]:
+        if nxt is not None:
+            if st.button(nxt_label, key=f"btn_nxt_{back}_{nxt}",
+                         disabled=nxt_disabled, use_container_width=True, type="primary"):
+                st.session_state.step = nxt
+                st.rerun()
+
+# ── Step indicator ────────────────────────────────────────────────────────────
+_LABEL_DISPLAY = {
+    "gga":       "Organic Pollution",
+    "gga-metal": "Metal Pollution",
+}
+
+def _get_step_labels() -> list:
+    cls = st.session_state.get("cls_pred") or ""
+    if cls == "gga":
+        return ["Upload", "Peak Extraction", "Classification",
+                "Phase Detection", "Tổng kết"]
+    return ["Upload", "Peak Extraction", "Classification",
+            "Phase Detection", "Toxicity", "Tổng kết"]
+
+def _render_indicator():
+    is_organic = (st.session_state.get("cls_pred") or "") == "gga"
+    labels = _get_step_labels()
+
+    # Map step number → indicator highlight index
+    if is_organic:
+        step_to_idx = {0: 0, 1: 1, 2: 2, 3: 3, 4: 3, 5: 4}
+        idx_to_time_key = {1: 1, 2: 2, 3: 3}
+    else:
+        step_to_idx = {i: i for i in range(6)}
+        idx_to_time_key = {1: 1, 2: 2, 3: 3, 4: 4}
+
+    cur = step_to_idx.get(st.session_state.step, st.session_state.step)
+    parts = []
+    for i, label in enumerate(labels):
+        t = st.session_state.step_times.get(idx_to_time_key.get(i))
+        tstr = f" <small>✓{t}s</small>" if t else (" <small>✓</small>" if i < cur else "")
+        if i < cur:
+            parts.append(
+                f'<span style="color:#16a34a;font-weight:600;">●&nbsp;{i+1}.&nbsp;{label}{tstr}</span>'
+            )
+        elif i == cur:
+            parts.append(
+                f'<span style="color:#1d4ed8;font-weight:700;border-bottom:2px solid #1d4ed8;">'
+                f'●&nbsp;{i+1}.&nbsp;{label}</span>'
+            )
+        else:
+            parts.append(f'<span style="color:#94a3b8;">○&nbsp;{i+1}.&nbsp;{label}</span>')
+    st.markdown("&nbsp;&nbsp;→&nbsp;&nbsp;".join(parts), unsafe_allow_html=True)
+    st.markdown("<hr style='margin:10px 0 20px'>", unsafe_allow_html=True)
+
+# ── Flow diagram helper ───────────────────────────────────────────────────────
+_BOX_CSS = (
+    "background:{bg};border:1.5px solid {border};border-radius:8px;"
+    "padding:7px 9px;text-align:center;font-size:11px;font-weight:500;"
+    "color:{tc};line-height:1.5;"
+)
+
+def _flow(nodes: list) -> None:
+    """Render a vertical flowchart with colored boxes.
+    nodes: dicts {label, bg, border, tc} or strings "↓" / "↓ edge-label",
+           or lists [node, node] for side-by-side branches.
+    """
+    parts = ['<div style="display:flex;flex-direction:column;gap:4px;padding:4px 0;">']
+    for n in nodes:
+        if isinstance(n, str):
+            edge = n.replace("↓", "").strip()
+            parts.append('<div style="text-align:center;color:#94a3b8;font-size:16px;line-height:1.2;">↓</div>')
+            if edge:
+                parts.append(f'<div style="text-align:center;color:#64748b;font-size:9px;margin-top:-4px;">{edge}</div>')
+        elif isinstance(n, list):
+            row = '<div style="display:flex;gap:4px;">'
+            for b in n:
+                row += (f'<div style="flex:1;{_BOX_CSS.format(**b)}">'
+                        + b["label"].replace("\n", "<br>") + "</div>")
+            row += "</div>"
+            parts.append(row)
+        else:
+            parts.append(f'<div style="{_BOX_CSS.format(**n)}">'
+                         + n["label"].replace("\n", "<br>") + "</div>")
+    parts.append("</div>")
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+# ── Signal chart (cached figure build) ───────────────────────────────────────
+@st.cache_data(show_spinner=False)
+def _build_chart_fig(do_array: np.ndarray, peak_xs: tuple = (), peak_ys: tuple = (), height: int = 380):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        y=do_array, mode="lines",
+        line=dict(color="#3b82f6", width=1.3), name="DO Signal",
+    ))
+    if peak_xs:
+        fig.add_trace(go.Scatter(
+            x=list(peak_xs), y=list(peak_ys), mode="markers",
+            marker=dict(color="#ef4444", size=9, symbol="x", line=dict(width=2)),
+            name="Peaks",
+        ))
+    fig.update_layout(
+        yaxis_title="DO (mV)", xaxis_title="Data Point",
+        template="plotly_white", height=height,
+        margin=dict(l=50, r=10, t=25, b=40),
+        legend=dict(orientation="h", y=1.02, x=1, xanchor="right"),
     )
-with btn_col:
-    run_clicked = st.button("▶ Phân tích", type="primary",
-                            disabled=(txt_file is None), use_container_width=True)
+    return fig
 
-# ── Pipeline execution ───────────────────────────────────────────────────────
-if run_clicked and txt_file is not None:
-    # Reset previous results
-    for key in ("peaks_df", "classification", "toxicity_df", "do_array",
-                "cls_name", "cls_pred", "cls_prob"):
-        st.session_state[key] = None
-    st.session_state.cls_error = None  # classification error detail
+def _signal_chart(do_array, peaks_df=None, height=380):
+    xs, ys = [], []
+    if peaks_df is not None and len(peaks_df) > 0 and "No.peak" in peaks_df.columns:
+        for x in peaks_df["No.peak"].dropna().astype(int).tolist():
+            if 0 <= x < len(do_array):
+                xs.append(x)
+                ys.append(float(do_array[x]))
+    fig = _build_chart_fig(do_array, tuple(xs), tuple(ys), height)
+    st.plotly_chart(fig, use_container_width=True)
 
-    # Write to temp file (spec Decision #7)
+# ── Tag coloring ──────────────────────────────────────────────────────────────
+def _color_tag(row):
+    tag = str(row.get("Tag", "")).strip().lower()
+    if tag == "phase1" or "bod10" in tag:
+        return ["background-color:#FEF9C3"] * len(row)
+    if tag == "transition":
+        return ["background-color:#FECACA"] * len(row)
+    if tag == "phase2" or "bod5" in tag:
+        return ["background-color:#DBEAFE"] * len(row)
+    return [""] * len(row)
+
+# ── Parse signal bytes to DO array (cached) ───────────────────────────────────
+@st.cache_data(show_spinner=False)
+def _parse_signal(file_bytes: bytes) -> tuple:
     tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+    tmp.write(file_bytes)
+    tmp.close()
     try:
-        txt_file.seek(0)
-        tmp.write(txt_file.read())
-        tmp.close()
-        tmp_path = tmp.name
+        try:
+            raw = pd.read_csv(tmp.name, sep="\t", header=None, usecols=[0, 1],
+                              names=["Time", "DO"], encoding="utf-16")
+        except UnicodeError:
+            rows = []
+            with open(tmp.name) as f:
+                for line in f:
+                    p = line.split()
+                    if len(p) >= 2:
+                        try:
+                            rows.append((float(p[0].replace("\x00", "")),
+                                         float(p[1].replace("\x00", ""))))
+                        except ValueError:
+                            pass
+            raw = pd.DataFrame(rows, columns=["Time", "DO"])
+        do = raw["DO"].values
+        return do, len(raw), float(do.min()), float(do.max())
+    finally:
+        os.unlink(tmp.name)
 
-        with st.spinner("Đang phân tích..."):
-            # 1. Parse raw signal for chart
-            try:
-                raw = pd.read_csv(tmp_path, sep="\t", header=None,
-                                  usecols=[0, 1], names=["Time", "DO"],
-                                  encoding="utf-16")
-            except UnicodeError:
-                time_list, do_list = [], []
-                with open(tmp_path, "r") as f:
-                    for line in f:
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            try:
-                                time_list.append(float(parts[0].replace("\x00", "")))
-                                do_list.append(float(parts[1].replace("\x00", "")))
-                            except ValueError:
-                                continue
-                raw = pd.DataFrame({"Time": time_list, "DO": do_list})
 
-            if raw.empty or len(raw) < 2:
-                st.error("File không đọc được. Kiểm tra định dạng UTF-16.")
-                st.stop()
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 0 — UPLOAD
+# ═══════════════════════════════════════════════════════════════════════════════
+def render_step_0():
+    st.markdown('<p class="step-title">📁 Bước 1 — Tải lên dữ liệu</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-desc">'
+        'Tải lên file đo DO từ thiết bị (định dạng UTF-16, cột Time / DO). '
+        'Hệ thống sẽ vẽ tín hiệu thô để bạn kiểm tra trước khi phân tích.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
 
-            st.session_state.do_array = raw["DO"].values
-            st.session_state.signal_points = len(raw)
-            st.session_state.do_min = float(raw["DO"].min())
-            st.session_state.do_max = float(raw["DO"].max())
-            st.session_state.sample_name = os.path.basename(txt_file.name).replace(".txt", "").strip()
+    col_main, col_diag = st.columns([3, 1])
+    with col_diag:
+        _flow([
+            {"label": "🔬 Thiết bị DO\n(Sensor)", "bg": "#dbeafe", "border": "#60a5fa", "tc": "#1e40af"},
+            "↓",
+            {"label": "📄 File .txt\nUTF-16 encoding", "bg": "#f0fdf4", "border": "#4ade80", "tc": "#166534"},
+            "↓",
+            {"label": "⚙️ Parse\n→ DO array", "bg": "#fef9c3", "border": "#fbbf24", "tc": "#92400e"},
+        ])
 
-            # 2. Peak extraction
-            peaks_df = extract_peaks_from_txt(tmp_path)
-            for col in ("Doin (mV)", "No.peak", "DOmin (mV)", "DDO (mV)"):
-                peaks_df[col] = pd.to_numeric(peaks_df[col], errors="coerce")
-            st.session_state.peaks_df = peaks_df
+    with col_main:
+        uploaded = st.file_uploader(
+            "Chọn file .txt (UTF-16, Time/DO columns)",
+            type=["txt"],
+            label_visibility="collapsed",
+        )
 
-            # 3. Classification
-            if len(peaks_df) > 0:
+        if uploaded:
+            name = uploaded.name.replace(".txt", "").strip()
+            if st.session_state.sample_name != name:
+                with st.spinner("Đang đọc tín hiệu..."):
+                    uploaded.seek(0)
+                    file_bytes = uploaded.read()
+                    do_array, pts, do_min, do_max = _parse_signal(file_bytes)
+                st.session_state.update(dict(
+                    file_bytes=file_bytes, sample_name=name,
+                    do_array=do_array, signal_points=pts,
+                    do_min=do_min, do_max=do_max,
+                    peaks_df=None, cls_pred=None, cls_prob=None,
+                    cls_error=None, phase_error=None, toxicity_df=None,
+                    tox_val=None, stage1_tag=None, stage2_tag=None,
+                    s1_ddo=None, s2_ddo=None, step_times={},
+                ))
+
+            if st.session_state.do_array is not None:
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Tín hiệu", f"{st.session_state.signal_points:,} pts")
+                c2.metric("DO min", f"{st.session_state.do_min:.2f} mV")
+                c3.metric("DO max", f"{st.session_state.do_max:.2f} mV")
+                _signal_chart(st.session_state.do_array, height=320)
+
+            st.markdown("---")
+            _nav(nxt=1, nxt_label="▶ Bắt đầu phân tích")
+
+        elif st.session_state.file_bytes is not None:
+            # Navigating back — existing file already in session, no re-upload needed
+            st.success(f"✅ File đã tải: **{st.session_state.sample_name}**  ·  Tải file mới phía trên để thay thế.")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Tín hiệu", f"{st.session_state.signal_points:,} pts")
+            c2.metric("DO min", f"{st.session_state.do_min:.2f} mV")
+            c3.metric("DO max", f"{st.session_state.do_max:.2f} mV")
+            _signal_chart(st.session_state.do_array, height=320)
+            st.markdown("---")
+            _nav(nxt=1, nxt_label="▶ Tiếp tục phân tích")
+
+        else:
+            st.info("📁 Upload file .txt để bắt đầu.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 1 — PEAK EXTRACTION
+# ═══════════════════════════════════════════════════════════════════════════════
+def render_step_1():
+    st.markdown('<p class="step-title">⛏️ Bước 2 — Trích xuất Peak</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-desc">'
+        'Thuật toán 2-pass phát hiện các điểm <b>DOin</b> (nồng độ ban đầu) và '
+        '<b>DOmin</b> (nồng độ đáy) trong mỗi chu kỳ đo. '
+        '<b>DDO = DOin − DOmin</b> là độ suy giảm oxy dùng để phân tích sau. '
+        'HH signal được tự động nhận diện và tái trích xuất với thông số riêng.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    col_main, col_diag = st.columns([3, 1])
+    with col_diag:
+        _flow([
+            {"label": "📈 DO array", "bg": "#dbeafe", "border": "#60a5fa", "tc": "#1e40af"},
+            "↓ Pass 1",
+            {"label": "🔍 Smooth\nMinima detect\nFind plateau", "bg": "#f0fdf4", "border": "#4ade80", "tc": "#166534"},
+            "↓",
+            {"label": "◇ DDO P90 > 12mV?\nYes ▶ Pass 2 (HH)\nNo  ▶ done", "bg": "#fefce8", "border": "#fbbf24", "tc": "#92400e"},
+            "↓",
+            {"label": "📋 peaks_df\nDOin · DOmin\nDDO · No.peak", "bg": "#ede9fe", "border": "#a78bfa", "tc": "#5b21b6"},
+        ])
+
+    with col_main:
+        if st.session_state.peaks_df is None:
+            with st.spinner("Đang trích xuất peak..."):
+                t0 = time.time()
+                tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+                tmp.write(st.session_state.file_bytes)
+                tmp.close()
+                try:
+                    peaks_df = extract_peaks_from_txt(tmp.name)
+                    for col in ("Doin (mV)", "No.peak", "DOmin (mV)", "DDO (mV)"):
+                        peaks_df[col] = pd.to_numeric(peaks_df[col], errors="coerce")
+                    st.session_state.peaks_df = peaks_df
+                    st.session_state.step_times[1] = round(time.time() - t0, 2)
+                finally:
+                    os.unlink(tmp.name)
+
+        peaks_df = st.session_state.peaks_df
+        elapsed = st.session_state.step_times.get(1)
+        if elapsed:
+            st.markdown(f'<span class="elapsed-badge">⏱ {elapsed}s</span>', unsafe_allow_html=True)
+
+        ddo_min = peaks_df["DDO (mV)"].min()
+        ddo_max = peaks_df["DDO (mV)"].max()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Peaks phát hiện", len(peaks_df))
+        c2.metric("DDO min", f"{ddo_min:.2f} mV")
+        c3.metric("DDO max", f"{ddo_max:.2f} mV")
+
+        _signal_chart(st.session_state.do_array, peaks_df=peaks_df, height=300)
+
+        display_df = peaks_df[["No.peak", "Tag", "Doin (mV)", "DOmin (mV)", "DDO (mV)"]].copy()
+        st.dataframe(
+            display_df.style.format({"Doin (mV)": "{:.2f}", "DOmin (mV)": "{:.2f}", "DDO (mV)": "{:.2f}"}),
+            use_container_width=True, height=280,
+        )
+
+    st.markdown("---")
+    _nav(back=0, nxt=2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 2 — CLASSIFICATION
+# ═══════════════════════════════════════════════════════════════════════════════
+def render_step_2():
+    st.markdown('<p class="step-title">🧬 Bước 3 — Phân loại mẫu</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-desc">'
+        'Mô hình <b>CatBoost</b> (81 đặc trưng, accuracy 84.4% trên 518 file) phân loại '
+        'mẫu thành <b>GGA</b> (nước thải sinh hoạt) hoặc <b>GGA-Metal</b> (có kim loại nặng). '
+        'Nhãn phân loại này ảnh hưởng trực tiếp đến thuật toán phát hiện pha ở bước tiếp theo.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    col_main, col_diag = st.columns([3, 1])
+    with col_diag:
+        _flow([
+            {"label": "📋 peaks_df\n81 features", "bg": "#dbeafe", "border": "#60a5fa", "tc": "#1e40af"},
+            "↓",
+            {"label": "🤖 CatBoost\niter=300, depth=8\n84.4% accuracy", "bg": "#f0fdf4", "border": "#4ade80", "tc": "#166534"},
+            "↓",
+            [
+                {"label": "🟢 GGA", "bg": "#dcfce7", "border": "#4ade80", "tc": "#166534"},
+                {"label": "🔶 Metal", "bg": "#fef3c7", "border": "#fbbf24", "tc": "#92400e"},
+            ],
+            "↓",
+            {"label": "🎯 Probability\n(confidence %)", "bg": "#ede9fe", "border": "#a78bfa", "tc": "#5b21b6"},
+        ])
+
+    with col_main:
+        if st.session_state.cls_pred is None:
+            with st.spinner("Đang phân loại mẫu..."):
+                t0 = time.time()
                 try:
                     results = catboost_inference_from_csv(
-                        peaks_df,
+                        st.session_state.peaks_df,
                         model_path="model/catboost_model.cbm",
                         label_encoder_path="model/label_encoder_classes.npy",
                     )
-                    name, pred, prob = results[0]
-                    st.session_state.cls_name = name
+                    _, pred, prob = results[0]
                     st.session_state.cls_pred = str(pred)
                     st.session_state.cls_prob = float(prob.max())
                 except Exception as e:
-                    st.session_state.cls_pred = "Lỗi phân loại"
+                    st.session_state.cls_pred = "Lỗi"
                     st.session_state.cls_prob = 0.0
-                    st.session_state.cls_name = st.session_state.sample_name
                     st.session_state.cls_error = str(e)
+                st.session_state.step_times[2] = round(time.time() - t0, 2)
 
-            # 3.5 Phase boundary detection (rewrite Tag column)
-            if len(peaks_df) > 0:
-                try:
-                    peaks_df = update_phase_tags(
-                        peaks_df,
-                        st.session_state.cls_pred or 'GGA'
-                    )
-                    st.session_state.peaks_df = peaks_df  # refresh stored df
-                except Exception as e:
-                    # Non-fatal: keep peaks_df as-is, toxicity will fallback to BOD10/BOD5
-                    st.session_state.phase_error = str(e)
+        elapsed = st.session_state.step_times.get(2)
+        if elapsed:
+            st.markdown(f'<span class="elapsed-badge">⏱ {elapsed}s</span>', unsafe_allow_html=True)
 
-            # 4. Toxicity
-            if len(peaks_df) > 0:
-                st.session_state.toxicity_df = calculate_toxicity(peaks_df)
+        cls = st.session_state.cls_pred or "—"
+        prob = st.session_state.cls_prob or 0.0
+        is_err = cls == "Lỗi"
+        bg = "linear-gradient(135deg,#fff7ed,#ffedd5)" if is_err else "linear-gradient(135deg,#f0fdf4,#dcfce7)"
+        border = "#fb923c" if is_err else "#86efac"
+        text_color = "#c2410c" if is_err else "#15803d"
 
-        st.session_state.ran = True
+        st.markdown(f"""
+        <div style="text-align:center;padding:48px 24px;background:{bg};
+             border-radius:16px;border:2px solid {border};margin:8px 0 24px;">
+            <div style="font-size:13px;color:#64748b;margin-bottom:8px;letter-spacing:.06em;">
+                KẾT QUẢ PHÂN LOẠI
+            </div>
+            <div style="font-size:64px;font-weight:800;color:{text_color};line-height:1.1;">
+                {cls}
+            </div>
+            <div style="font-size:22px;color:#94a3b8;margin-top:10px;">
+                {prob * 100:.1f}% xác suất
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  RESULTS DISPLAY (only after pipeline has run)
-# ═══════════════════════════════════════════════════════════════════════════════
-if st.session_state.ran and st.session_state.peaks_df is not None:
-    peaks_df = st.session_state.peaks_df
-
-    # ── Handle 0 peaks ───────────────────────────────────────────────────
-    if len(peaks_df) == 0:
-        st.markdown('<p class="warn-msg">⚠️ Không phát hiện peak. Kiểm tra dữ liệu đầu vào.</p>',
-                    unsafe_allow_html=True)
-        # Still show signal chart
-        if st.session_state.do_array is not None:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(y=st.session_state.do_array, mode="lines",
-                                     line=dict(color="#3b82f6", width=1.5),
-                                     name="DO Signal"))
-            fig.update_layout(title="DO Signal / Tín hiệu DO",
-                              yaxis_title="DO (mV)", xaxis_title="Data Point",
-                              template="plotly_white", height=350)
-            st.plotly_chart(fig, use_container_width=True)
-        st.stop()
-
-    # ── Summary cards ────────────────────────────────────────────────────
-    tag_counts = peaks_df["Tag"].value_counts()
-    bod_str = " · ".join(f"{count} {tag}" for tag, count in tag_counts.items())
-
-    tox_row = st.session_state.toxicity_df.iloc[0] if st.session_state.toxicity_df is not None and len(st.session_state.toxicity_df) > 0 else None
-    tox_val = tox_row["Toxicity (%)"] if tox_row is not None and tox_row["Toxicity (%)"] is not None and pd.notna(tox_row["Toxicity (%)"]) else None
-    stage1_tag = tox_row["Stage 1"] if tox_row is not None else None
-    stage2_tag = tox_row["Stage 2"] if tox_row is not None else None
-
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Số Peak", len(peaks_df), help=bod_str)
-        st.caption(bod_str)
-    with c2:
-        pred_label = st.session_state.cls_pred or "—"
-        prob_pct = f"{st.session_state.cls_prob * 100:.1f}%" if st.session_state.cls_prob else "—"
-        st.metric("Phân loại", pred_label, help=f"Xác suất: {prob_pct}")
-        st.caption(f"Xác suất: {prob_pct}")
         if st.session_state.cls_error:
             with st.expander("Chi tiết lỗi"):
                 st.code(st.session_state.cls_error)
+
+    st.markdown("---")
+    _nav(back=1, nxt=3)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 3 — PHASE DETECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+def render_step_3():
+    st.markdown('<p class="step-title">🔍 Bước 4 — Phát hiện ranh giới pha</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-desc">'
+        'Mỗi peak được gán nhãn <b>phase1</b> (ổn định ban đầu), '
+        '<b>transition</b> (vùng chuyển tiếp không ổn định), '
+        'hoặc <b>phase2</b> (ổn định cuối). '
+        'Routing: GGA → change-point algorithm · Metal → Random Forest (CV 93%) · '
+        'HH → Random Forest (CV 94%). Toxicity sẽ tính trên phase1 vs phase2, bỏ qua transition.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    col_main, col_diag = st.columns([3, 1])
+    with col_diag:
+        _flow([
+            {"label": "📋 peaks_df", "bg": "#dbeafe", "border": "#60a5fa", "tc": "#1e40af"},
+            "↓",
+            {"label": "◇ Routing\nn&lt;8 → fallback\nHH → RF (94%)\nMetal → RF (93%)\nGGA → change-pt", "bg": "#fefce8", "border": "#fbbf24", "tc": "#92400e"},
+            "↓",
+            [
+                {"label": "🟡 phase1", "bg": "#fef9c3", "border": "#fbbf24", "tc": "#92400e"},
+                {"label": "🔴 trans.", "bg": "#fee2e2", "border": "#f87171", "tc": "#b91c1c"},
+                {"label": "🔵 phase2", "bg": "#dbeafe", "border": "#60a5fa", "tc": "#1e40af"},
+            ],
+        ])
+
+    with col_main:
+        if "phase_confidence" not in st.session_state.peaks_df.columns:
+            with st.spinner("Đang phát hiện ranh giới pha..."):
+                t0 = time.time()
+                try:
+                    peaks_df = update_phase_tags(
+                        st.session_state.peaks_df,
+                        st.session_state.cls_pred or "GGA",
+                    )
+                    st.session_state.peaks_df = peaks_df
+                except Exception as e:
+                    st.session_state.phase_error = str(e)
+                st.session_state.step_times[3] = round(time.time() - t0, 2)
+
+        peaks_df = st.session_state.peaks_df
+        elapsed = st.session_state.step_times.get(3)
+        if elapsed:
+            st.markdown(f'<span class="elapsed-badge">⏱ {elapsed}s</span>', unsafe_allow_html=True)
+
+        # Phase distribution
+        tag_counts = peaks_df["Tag"].value_counts()
+        cols_tags = st.columns(max(len(tag_counts), 1))
+        color_map = {"phase1": ("#ca8a04", "#fef9c3", "#fbbf24"),
+                     "transition": ("#dc2626", "#fee2e2", "#fca5a5"),
+                     "phase2": ("#1d4ed8", "#dbeafe", "#93c5fd")}
+        for i, (tag, cnt) in enumerate(tag_counts.items()):
+            tc, bg, border = color_map.get(tag.lower(), ("#475569", "#f8fafc", "#cbd5e1"))
+            with cols_tags[i]:
+                st.markdown(f"""<div style="text-align:center;padding:20px 12px;background:{bg};
+                     border-radius:10px;border:1.5px solid {border};margin-bottom:12px;">
+                    <div style="font-size:34px;font-weight:800;color:{tc};">{cnt}</div>
+                    <div style="font-size:13px;color:#475569;font-weight:600;">{tag}</div>
+                </div>""", unsafe_allow_html=True)
+
+        # Low confidence warning
+        if "phase_confidence" in peaks_df.columns:
+            non_t = peaks_df[peaks_df["Tag"].isin(["phase1", "phase2"])]
+            if not non_t.empty and float(non_t["phase_confidence"].mean()) < 0.6:
+                st.warning(f"⚠ Phase confidence thấp ({non_t['phase_confidence'].mean():.2f}). "
+                           "Kết quả toxicity có thể không chính xác.")
+
+        if st.session_state.phase_error:
+            st.error(f"Lỗi phase detection: {st.session_state.phase_error}")
+
+        display_df = peaks_df[["No.peak", "Tag", "Doin (mV)", "DOmin (mV)", "DDO (mV)"]].copy()
+        styled = (display_df.style
+                  .apply(_color_tag, axis=1)
+                  .format({"Doin (mV)": "{:.2f}", "DOmin (mV)": "{:.2f}", "DDO (mV)": "{:.2f}"}))
+        st.dataframe(styled, use_container_width=True, height=380)
+
+    st.markdown("---")
+    _nav(back=2, nxt=4)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 4 — TOXICITY
+# ═══════════════════════════════════════════════════════════════════════════════
+def render_step_4():
+    st.markdown('<p class="step-title">☣️ Bước 5 — Tính độc tính</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-desc">'
+        'Độ độc tính phản ánh mức độ ức chế vi sinh vật trong mẫu nước. '
+        'Công thức: <b>Toxicity = (DDO₁ − DDO₂) / DDO₁ × 100%</b> — '
+        'so sánh DDO trung bình của phase1 và phase2. '
+        'Các peak <i>transition</i> bị loại bỏ để tránh nhiễu tính toán.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    col_main, col_diag = st.columns([3, 1])
+    with col_diag:
+        _flow([
+            {"label": "📋 peaks_df\n(with Tags)", "bg": "#dbeafe", "border": "#60a5fa", "tc": "#1e40af"},
+            "↓",
+            {"label": "🚫 Filter\nskip transition", "bg": "#fee2e2", "border": "#f87171", "tc": "#b91c1c"},
+            "↓",
+            [
+                {"label": "🟢 phase1\nDDO₁ mean", "bg": "#dcfce7", "border": "#4ade80", "tc": "#166534"},
+                {"label": "🔵 phase2\nDDO₂ mean", "bg": "#dbeafe", "border": "#60a5fa", "tc": "#1e40af"},
+            ],
+            "↓",
+            {"label": "☣️ Toxicity %\n(DDO₁−DDO₂)\n÷ DDO₁ × 100", "bg": "#fef9c3", "border": "#fbbf24", "tc": "#92400e"},
+        ])
+
+    with col_main:
+        if st.session_state.toxicity_df is None:
+            with st.spinner("Đang tính độc tính..."):
+                t0 = time.time()
+                st.session_state.toxicity_df = calculate_toxicity(st.session_state.peaks_df)
+                st.session_state.step_times[4] = round(time.time() - t0, 2)
+
+        elapsed = st.session_state.step_times.get(4)
+        if elapsed:
+            st.markdown(f'<span class="elapsed-badge">⏱ {elapsed}s</span>', unsafe_allow_html=True)
+
+        tox_df = st.session_state.toxicity_df
+        tox_row = tox_df.iloc[0] if tox_df is not None and len(tox_df) > 0 else None
+        tox_val  = tox_row["Toxicity (%)"] if tox_row is not None and pd.notna(tox_row["Toxicity (%)"]) else None
+        stage1   = tox_row["Stage 1"]     if tox_row is not None else None
+        stage2   = tox_row["Stage 2"]     if tox_row is not None else None
+
+        peaks_df = st.session_state.peaks_df
+        s1_peaks = peaks_df[peaks_df["Tag"].str.strip() == str(stage1).strip()] if stage1 else pd.DataFrame()
+        s2_peaks = peaks_df[peaks_df["Tag"].str.strip() == str(stage2).strip()] if stage2 else pd.DataFrame()
+        s1_ddo   = float(s1_peaks["DDO (mV)"].mean()) if not s1_peaks.empty else None
+        s2_ddo   = float(s2_peaks["DDO (mV)"].mean()) if not s2_peaks.empty else None
+
+        # Cache for summary step
+        st.session_state.update(dict(tox_val=tox_val, stage1_tag=stage1,
+                                     stage2_tag=stage2, s1_ddo=s1_ddo, s2_ddo=s2_ddo))
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            s1_str = f"{s1_ddo:.3f} mV" if s1_ddo is not None else "N/A"
+            st.markdown(f"""<div style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);
+                 border:2px solid #86efac;border-radius:14px;padding:28px;text-align:center;">
+                <div style="color:#166534;font-size:11px;font-weight:700;letter-spacing:.06em;">
+                    STAGE 1 · {stage1 or "—"}</div>
+                <div style="font-size:32px;font-weight:800;color:#15803d;margin:8px 0;">{s1_str}</div>
+                <div style="color:#64748b;font-size:12px;">{len(s1_peaks)} peaks · DDO₁ trung bình</div>
+            </div>""", unsafe_allow_html=True)
+
+        with c2:
+            tox_str   = f"{tox_val}%" if tox_val is not None else "N/A"
+            tox_color = "#b45309" if tox_val is not None else "#64748b"
+            st.markdown(f"""<div style="background:linear-gradient(135deg,#fefce8,#fef9c3);
+                 border:2px solid #fbbf24;border-radius:14px;padding:28px;text-align:center;">
+                <div style="color:#92400e;font-size:11px;font-weight:700;letter-spacing:.06em;">
+                    ĐỘ ĐỘC / TOXICITY</div>
+                <div style="font-size:52px;font-weight:800;color:{tox_color};margin:8px 0;">
+                    {tox_str}</div>
+                <div style="color:#78350f;font-size:11px;">(DDO₁ − DDO₂) / DDO₁ × 100</div>
+            </div>""", unsafe_allow_html=True)
+
+        with c3:
+            s2_str = f"{s2_ddo:.3f} mV" if s2_ddo is not None else "N/A"
+            st.markdown(f"""<div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);
+                 border:2px solid #93c5fd;border-radius:14px;padding:28px;text-align:center;">
+                <div style="color:#1e40af;font-size:11px;font-weight:700;letter-spacing:.06em;">
+                    STAGE 2 · {stage2 or "—"}</div>
+                <div style="font-size:32px;font-weight:800;color:#1d4ed8;margin:8px 0;">{s2_str}</div>
+                <div style="color:#64748b;font-size:12px;">{len(s2_peaks)} peaks · DDO₂ trung bình</div>
+            </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+    _nav(back=3, nxt=5, nxt_label="Xem tổng kết →")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 5 — SUMMARY
+# ═══════════════════════════════════════════════════════════════════════════════
+def render_step_5():
+    st.markdown('<p class="step-title">📊 Tổng kết kết quả</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-desc">'
+        'Toàn bộ kết quả phân tích được tổng hợp ở đây. '
+        'Bạn có thể xuất báo cáo Excel hoặc quay lại bất kỳ bước nào để xem lại chi tiết.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    peaks_df  = st.session_state.peaks_df
+    tox_val   = st.session_state.tox_val
+    stage1    = st.session_state.stage1_tag
+    stage2    = st.session_state.stage2_tag
+    s1_ddo    = st.session_state.s1_ddo
+    s2_ddo    = st.session_state.s2_ddo
+
+    # ── 4 metric cards ────────────────────────────────────────────────────────
+    tag_counts = peaks_df["Tag"].value_counts()
+    bod_str = " · ".join(f"{cnt} {tag}" for tag, cnt in tag_counts.items())
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.metric("Số Peak", len(peaks_df))
+        st.caption(bod_str)
+    with c2:
+        st.metric("Phân loại", st.session_state.cls_pred or "—",
+                  help=f"{(st.session_state.cls_prob or 0) * 100:.1f}% xác suất")
+        st.caption(f"{(st.session_state.cls_prob or 0) * 100:.1f}% xác suất")
     with c3:
-        tox_display = f"{tox_val}%" if tox_val is not None else "N/A"
-        st.metric("Độ độc / Toxicity", tox_display)
-        if stage1_tag and stage2_tag:
-            st.caption(f"Stage 1: {stage1_tag} · Stage 2: {stage2_tag}")
-        elif tox_val is None:
-            st.caption("Cần ít nhất 2 loại Tag (BOD5 + BOD10)")
+        st.metric("Độ độc", f"{tox_val}%" if tox_val is not None else "N/A")
+        if stage1 and stage2:
+            st.caption(f"{stage1} → {stage2}")
     with c4:
-        st.metric("Tín hiệu DO", f"{st.session_state.signal_points:,} pts")
+        st.metric("Tín hiệu", f"{st.session_state.signal_points:,} pts")
         st.caption(f"{st.session_state.do_min:.2f} – {st.session_state.do_max:.2f} mV")
 
-    # DDO range text
-    ddo_min = peaks_df["DDO (mV)"].min()
-    ddo_max = peaks_df["DDO (mV)"].max()
-    st.markdown(f"**DDO Range:** {ddo_min:.2f} – {ddo_max:.2f} mV")
     st.markdown("---")
 
-    # Phase detection confidence warning
-    if "phase_confidence" in peaks_df.columns:
-        non_t = peaks_df[peaks_df["Tag"].isin(["phase1", "phase2"])]
-        if not non_t.empty:
-            mean_conf = float(non_t["phase_confidence"].mean())
-            if mean_conf < 0.6:
-                st.markdown(
-                    f'<p class="warn-msg">⚠️ Phase detection confidence thấp '
-                    f'({mean_conf:.2f}). Kết quả toxicity có thể không chính xác.</p>',
-                    unsafe_allow_html=True,
-                )
+    # ── Timeline ──────────────────────────────────────────────────────────────
+    st.markdown("### ⏱ Thời gian xử lý")
+    step_name_map = {1: "Peak Extraction", 2: "Classification",
+                     3: "Phase Detection", 4: "Toxicity"}
+    rows, total = [], 0.0
+    for i, name in step_name_map.items():
+        t = st.session_state.step_times.get(i, 0.0)
+        total += t
+        rows.append({"Bước": name, "Thời gian": f"{t}s"})
+    rows.append({"Bước": "**Tổng cộng**", "Thời gian": f"**{total:.2f}s**"})
+    st.table(pd.DataFrame(rows))
 
-    # ── Signal chart ─────────────────────────────────────────────────────
-    if st.session_state.do_array is not None:
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            y=st.session_state.do_array, mode="lines",
-            line=dict(color="#3b82f6", width=1.5), name="DO Signal",
-        ))
-        fig.update_layout(
-            title="📈 DO Signal / Tín hiệu DO",
-            yaxis_title="DO (mV)",
-            xaxis_title="Data Point",
-            template="plotly_white",
-            height=380,
-            margin=dict(l=60, r=20, t=50, b=40),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    st.markdown("---")
 
-    # ── Detail: Peaks Table (2/3) + Toxicity Panel (1/3) ────────────────
-    left_col, right_col = st.columns([2, 1])
+    # ── Export + Reset ────────────────────────────────────────────────────────
+    excel_buf = generate_excel_report(
+        sample_name=st.session_state.sample_name or "Unknown",
+        peaks_df=peaks_df,
+        classification=st.session_state.cls_pred or "N/A",
+        probability=st.session_state.cls_prob or 0.0,
+        toxicity_pct=tox_val,
+        stage1_tag=stage1,
+        stage1_ddo_avg=s1_ddo,
+        stage2_tag=stage2,
+        stage2_ddo_avg=s2_ddo,
+        signal_points=st.session_state.signal_points or 0,
+        do_min=st.session_state.do_min or 0.0,
+        do_max=st.session_state.do_max or 0.0,
+    )
 
-    with left_col:
-        st.subheader("📋 Bảng chi tiết Peak")
-        display_df = peaks_df[["No.peak", "Tag", "Doin (mV)", "DOmin (mV)", "DDO (mV)"]].copy()
-
-        def _color_tag(row):
-            tag = str(row.get("Tag", "")).strip().lower()
-            if tag == "phase1" or "bod10" in tag:
-                return ["background-color: #FEF9C3"] * len(row)  # yellow
-            if tag == "transition":
-                return ["background-color: #FECACA"] * len(row)  # light red
-            if tag == "phase2" or "bod5" in tag:
-                return ["background-color: #DBEAFE"] * len(row)  # blue
-            return [""] * len(row)
-
-        styled = (
-            display_df.style
-            .apply(_color_tag, axis=1)
-            .format({"Doin (mV)": "{:.2f}", "DOmin (mV)": "{:.2f}", "DDO (mV)": "{:.2f}"})
-        )
-        st.dataframe(styled, use_container_width=True, height=400)
-
-    with right_col:
-        st.subheader("🧪 Chi tiết độ độc")
-
-        # Stage 1
-        if stage1_tag:
-            s1_peaks = peaks_df[peaks_df["Tag"].str.strip() == stage1_tag.strip()]
-            s1_ddo = s1_peaks["DDO (mV)"].mean() if not s1_peaks.empty else None
-            s1_ddo_str = f"{s1_ddo:.2f}" if s1_ddo is not None else "N/A"
-            st.markdown(f"""<div class="stage-card">
-                <div style="color:#166534;font-size:12px;font-weight:600;">STAGE 1 ({stage1_tag})</div>
-                <div style="font-size:20px;font-weight:700;color:#15803d;">DDO = {s1_ddo_str} mV</div>
-                <div style="color:#64748b;font-size:12px;">{len(s1_peaks)} peak(s) trung bình</div>
-            </div>""", unsafe_allow_html=True)
-        else:
-            s1_ddo = None
-            st.markdown('<div class="stage-card"><em>Không có Stage 1</em></div>', unsafe_allow_html=True)
-
-        # Stage 2
-        if stage2_tag:
-            s2_peaks = peaks_df[peaks_df["Tag"].str.strip() == stage2_tag.strip()]
-            s2_ddo = s2_peaks["DDO (mV)"].mean() if not s2_peaks.empty else None
-            s2_ddo_str = f"{s2_ddo:.2f}" if s2_ddo is not None else "N/A"
-            st.markdown(f"""<div class="stage-card">
-                <div style="color:#1e40af;font-size:12px;font-weight:600;">STAGE 2 ({stage2_tag})</div>
-                <div style="font-size:20px;font-weight:700;color:#1d4ed8;">DDO = {s2_ddo_str} mV</div>
-                <div style="color:#64748b;font-size:12px;">{len(s2_peaks)} peak(s) trung bình</div>
-            </div>""", unsafe_allow_html=True)
-        else:
-            s2_ddo = None
-            st.markdown('<div class="stage-card"><em>Không có Stage 2</em></div>', unsafe_allow_html=True)
-
-        # Toxicity result
-        st.markdown(f"""<div class="tox-result">
-            <div style="color:#92400e;font-size:12px;font-weight:600;">TOXICITY</div>
-            <div style="font-size:28px;font-weight:800;color:#a16207;">
-                {f'{tox_val}%' if tox_val is not None else 'N/A'}
-            </div>
-            <div style="color:#78350f;font-size:11px;">(DDO₁ - DDO₂) / DDO₁ × 100</div>
-        </div>""", unsafe_allow_html=True)
-
-        # ── Excel export ─────────────────────────────────────────────────
-        st.markdown("---")
-        excel_buf = generate_excel_report(
-            sample_name=st.session_state.sample_name or "Unknown",
-            peaks_df=peaks_df,
-            classification=st.session_state.cls_pred or "N/A",
-            probability=st.session_state.cls_prob or 0.0,
-            toxicity_pct=tox_val,
-            stage1_tag=stage1_tag,
-            stage1_ddo_avg=s1_ddo,
-            stage2_tag=stage2_tag,
-            stage2_ddo_avg=s2_ddo,
-            signal_points=st.session_state.signal_points or 0,
-            do_min=st.session_state.do_min or 0.0,
-            do_max=st.session_state.do_max or 0.0,
-        )
+    dl_col, reset_col = st.columns(2)
+    with dl_col:
         st.download_button(
             label="📥 Xuất Excel Report",
             data=excel_buf,
             file_name=f"VHL_Report_{st.session_state.sample_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="primary",
+            use_container_width=True, type="primary",
         )
+    with reset_col:
+        if st.button("🔄 Phân tích mẫu mới", key="btn_reset", use_container_width=True):
+            _reset()
+            st.rerun()
 
-elif st.session_state.ran is None:
-    st.info("📁 Upload file .txt rồi nhấn **▶ Phân tích** để bắt đầu.")
+    _nav(back=4)
 
-# ── Footer ───────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAIN DISPATCH
+# ═══════════════════════════════════════════════════════════════════════════════
+_RENDERERS = [render_step_0, render_step_1, render_step_2,
+              render_step_3, render_step_4, render_step_5]
+
+# Header
+st.markdown("""
+<div style="background:linear-gradient(135deg,#1a365d,#2d5d8a);padding:16px 24px;
+     border-radius:12px;margin-bottom:16px;display:flex;
+     justify-content:space-between;align-items:center;">
+    <div>
+        <span style="color:white;font-size:22px;font-weight:700;">🔬 VHL Biology Analysis</span>
+        <span style="color:rgba(255,255,255,0.6);font-size:13px;margin-left:14px;">
+            Phân tích DO &amp; Phân loại mẫu sinh học
+        </span>
+    </div>
+    <span style="background:rgba(255,255,255,0.15);padding:4px 12px;border-radius:6px;
+          color:white;font-size:12px;">v2.2.0</span>
+</div>
+""", unsafe_allow_html=True)
+
+_render_indicator()
+_RENDERERS[st.session_state.step]()
+
 st.markdown("---")
-st.caption("VHL Biology Analysis · Powered by Streamlit · v1.1.0")
+st.caption("VHL Biology Analysis · Powered by Streamlit · v2.2.0")
