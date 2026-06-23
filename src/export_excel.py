@@ -32,14 +32,16 @@ def generate_excel_report(
     peaks_df: pd.DataFrame,
     classification: str,
     probability: float,
-    toxicity_pct,
-    stage1_tag,
-    stage1_ddo_avg,
-    stage2_tag,
-    stage2_ddo_avg,
-    signal_points: int,
-    do_min: float,
-    do_max: float,
+    toxicity_pct=None,
+    stage1_tag=None,
+    stage1_ddo_avg=None,
+    stage2_tag=None,
+    stage2_ddo_avg=None,
+    signal_points: int = 0,
+    do_min: float = 0.0,
+    do_max: float = 0.0,
+    bod_phase1=None,
+    bod_phase2=None,
 ) -> BytesIO:
     """
     Build a formatted 2-sheet Excel report and return it as an in-memory buffer.
@@ -64,6 +66,10 @@ def generate_excel_report(
         Number of raw data points in the signal.
     do_min, do_max : float
         Min/max DO values from raw signal.
+    bod_phase1 : float | None
+        BOD Phase 1 value (mg/L), or None if unavailable.
+    bod_phase2 : float | None
+        BOD Phase 2 value (mg/L), or None if unavailable.
 
     Returns
     -------
@@ -100,6 +106,9 @@ def generate_excel_report(
         ("DDO Range (mV)", f"{peaks_df['DDO (mV)'].min():.2f} – {peaks_df['DDO (mV)'].max():.2f}"),
         ("Analysis Date / Ngay phan tich", datetime.now().strftime("%Y-%m-%d %H:%M")),
     ]
+    if bod_phase1 is not None:
+        summary_rows.insert(5, ("BOD Phase 2 (mg/L)", f"{bod_phase2:.3f}"))
+        summary_rows.insert(5, ("BOD Phase 1 (mg/L)", f"{bod_phase1:.3f}"))
 
     for i, (label, value) in enumerate(summary_rows, start=3):
         cell_label = ws_sum.cell(row=i, column=1, value=label)
