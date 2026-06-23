@@ -757,7 +757,7 @@ def render_step_5():
     bod_str = " · ".join(f"{cnt} {tag}" for tag, cnt in tag_counts.items())
 
     is_organic = (st.session_state.cls_pred or "") == "gga"
-    has_bod    = is_organic and st.session_state.bod_phase1 is not None
+    has_bod    = is_organic and st.session_state.bod_enabled and st.session_state.bod_phase1 is not None
     cls_display = _LABEL_DISPLAY.get(st.session_state.cls_pred or "", st.session_state.cls_pred or "—")
 
     if has_bod:
