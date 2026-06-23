@@ -13,7 +13,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from src.utils import extract_peaks_from_txt, catboost_inference_from_csv, calculate_toxicity
+from src.utils import (extract_peaks_from_txt, catboost_inference_from_csv,
+                        calculate_toxicity, calculate_bod_from_calibration)
 from src.phase_detector import update_phase_tags
 from src.export_excel import generate_excel_report
 
@@ -651,6 +652,87 @@ def render_step_4():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  STEP 4-BOD — BOD CONCENTRATION (Organic Pollution only)
+# ═══════════════════════════════════════════════════════════════════════════════
+def render_step_4_bod():
+    st.markdown('<p class="step-title">📊 Bước 4 — Tính nồng độ BOD</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="step-desc">'
+        'Nhập 2 điểm hiệu chuẩn (BOD, DDO) để xác định đường tuyến tính '
+        '<b>DDO = a · BOD + b</b>. Hệ thống sẽ suy ngược DDO của từng pha '
+        'để tính nồng độ BOD tương ứng.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    # Compute DDO averages from peaks_df (Toxicity step is skipped for Organic)
+    peaks_df = st.session_state.peaks_df
+    p1 = peaks_df[peaks_df["Tag"].str.strip() == "phase1"]
+    p2 = peaks_df[peaks_df["Tag"].str.strip() == "phase2"]
+    ddo_p1 = float(p1["DDO (mV)"].mean()) if not p1.empty else None
+    ddo_p2 = float(p2["DDO (mV)"].mean()) if not p2.empty else None
+
+    if ddo_p1 is None or ddo_p2 is None:
+        st.error("Không tìm thấy đủ peaks phase1 / phase2 để tính DDO. Quay lại bước trước.")
+        _nav(back=3, nxt=None)
+        return
+
+    col_form, col_result = st.columns([1, 1])
+
+    with col_form:
+        st.markdown("**Nhập điểm hiệu chuẩn**")
+        st.info(
+            f"DDO phase1 từ pipeline: **{ddo_p1:.3f} mV**  \n"
+            f"DDO phase2 từ pipeline: **{ddo_p2:.3f} mV**"
+        )
+        r1c1, r1c2 = st.columns(2)
+        bod1 = r1c1.number_input("BOD₁ (mg/L)", min_value=0.0, value=20.0, step=0.1, key="bod1_cal")
+        ddo1 = r1c2.number_input("DDO₁ (mV)",   min_value=0.0, value=11.3, step=0.1, key="ddo1_cal")
+        r2c1, r2c2 = st.columns(2)
+        bod2 = r2c1.number_input("BOD₂ (mg/L)", min_value=0.0, value=15.0, step=0.1, key="bod2_cal")
+        ddo2 = r2c2.number_input("DDO₂ (mV)",   min_value=0.0, value=9.13, step=0.01, key="ddo2_cal")
+        st.caption("Hai điểm này xác định đường tuyến tính DDO = a · BOD + b")
+
+    with col_result:
+        st.markdown("**Kết quả**")
+        valid = bod1 > 0 and ddo1 > 0 and bod2 > 0 and ddo2 > 0
+        if not valid:
+            st.warning("Nhập đầy đủ 4 giá trị > 0 để tính.")
+        else:
+            try:
+                res = calculate_bod_from_calibration(
+                    ddo_phase1=ddo_p1, ddo_phase2=ddo_p2,
+                    bod1_cal=bod1, ddo1_cal=ddo1,
+                    bod2_cal=bod2, ddo2_cal=ddo2,
+                )
+                st.session_state.update(dict(
+                    bod_phase1=res["bod_phase1"],
+                    bod_phase2=res["bod_phase2"],
+                    bod_a=res["a"],
+                    bod_b=res["b"],
+                ))
+                st.markdown(f"""
+                <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;
+                     padding:18px 20px;margin-bottom:12px;">
+                    <div style="font-size:13px;color:#64748b;margin-bottom:6px;">Phương trình hiệu chuẩn</div>
+                    <div style="font-size:18px;font-weight:700;color:#15803d;">
+                        DDO = {res['a']:.4f} · BOD + {res['b']:.4f}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                c1, c2 = st.columns(2)
+                c1.metric("BOD Phase 1", f"{res['bod_phase1']:.3f} mg/L",
+                          help=f"DDO phase1 = {ddo_p1:.3f} mV")
+                c2.metric("BOD Phase 2", f"{res['bod_phase2']:.3f} mg/L",
+                          help=f"DDO phase2 = {ddo_p2:.3f} mV")
+            except ValueError as e:
+                st.error(str(e))
+
+    st.markdown("---")
+    _nav(back=3, nxt=5)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 5 — SUMMARY
 # ═══════════════════════════════════════════════════════════════════════════════
 def render_step_5():
@@ -762,7 +844,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 _render_indicator()
-_RENDERERS[st.session_state.step]()
+
+def _dispatch():
+    step = st.session_state.step
+    if step == 4 and (st.session_state.get("cls_pred") or "") == "gga":
+        render_step_4_bod()
+    else:
+        _RENDERERS[step]()
+
+_dispatch()
 
 st.markdown("---")
 st.caption("VHL Biology Analysis · Powered by Streamlit · v2.2.0")
