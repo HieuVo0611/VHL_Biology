@@ -4,11 +4,8 @@ from catboost import CatBoostClassifier
 import numpy as np
 import pandas as pd
 import os
-import tensorflow as tf
-import plotly.express as px
-from sklearn.preprocessing import MinMaxScaler
-from keras.models import load_model
-from sklearn.metrics import mean_squared_error
+# tensorflow, keras, MinMaxScaler, mean_squared_error imported lazily inside
+# process_and_predict_lstm() — not needed at module load time by the Streamlit app
 
 from src.peak_extractor import extract_peaks_adaptive
 
@@ -393,6 +390,11 @@ def process_and_predict_lstm(txt_file_path, model_path, lookback=7, train_size=0
     - Plotly figure comparing actual and predicted DO values for train, validation, test sets, and full real values
     """
     import pandas as pd
+    import tensorflow as tf
+    import plotly.express as px
+    from sklearn.preprocessing import MinMaxScaler
+    from keras.models import load_model
+    from sklearn.metrics import mean_squared_error
     # Set seed for reproducibility
     seed = 42
     np.random.seed(seed)
