@@ -1,7 +1,7 @@
 # VHL Biology - Code Standards & Codebase Structure
 
 **Last Updated**: 2026-03-22
-**Version**: 1.1.0
+**Version**: 1.2.0
 **Applies To**: All Python code in VHL Biology project
 
 ## Directory Structure
@@ -15,8 +15,7 @@ VHL_Biology/
 ├── notebooks/               # Jupyter analysis & experimentation
 ├── data/                    # Sample and training data
 ├── docs/                    # Project documentation
-├── app.py                   # Streamlit Summary Dashboard v2.0 (root)
-├── app_legacy.py            # Legacy 5-step dashboard backup (root)
+├── app.py                   # Streamlit Wizard Dashboard v2.2.0 (root, 725 lines)
 ├── test.py                  # Standalone testing script (root)
 ├── peak_finder.py           # OriginLab integration (root)
 └── requirements.txt         # Python dependencies
@@ -39,13 +38,13 @@ VHL_Biology/
   - Two-pass HH detection, bias correction, tuned 485+ configs
   - Input: DO time-series array
   - Output: DataFrame [No.peak, Tag, Doin, DOmin, DDO, Sample Name]
-- **utils.py**: Core utilities (549 lines — feature engineering, 85+ features, inference)
+- **utils.py**: Core utilities (549 lines — feature engineering, 81 features (68 original + 13 robust), inference)
   - extract_peaks_from_txt(): TXT file wrapper for peak_extractor.py
   - catboost_inference_from_csv(): Classification from peaks
   - process_and_predict_lstm(): LSTM prediction on raw data
   - calculate_toxicity(): Domain-specific metrics
   - aggregate_features(): 81 features (9 categories) per sample
-- **export_excel.py**: Excel report generator (Summary Dashboard v2.0)
+- **export_excel.py**: Excel report generator (used by Wizard Dashboard v2.2.0)
   - Generates formatted 2-sheet workbook via openpyxl
   - Sheet 1 (Summary): sample name, classification, toxicity, signal stats
   - Sheet 2 (Peaks): full peaks table with BOD10/BOD5 color coding
@@ -60,10 +59,22 @@ VHL_Biology/
 - **test_bias_finetune.py**: Bias fine-tuning (19 configs)
 - **test_ml_correction.py**: ML correction experiment (GBR/RF vs uniform bias)
 - **generate-progress-report-260311.py**: Vietnamese progress report (.docx)
+- **validate-classifier-accuracy.py**: 518-file classification validation
+- **experiment-a-robust-features.py**: Feature engineering experiments
+- **experiment-b-augmentation.py**: Noise injection + oversampling tests
+- **experiment-c-ensemble.py**: Multi-model ensemble comparison
+- **experiment-d-aligned-training.py**: Aligned training on algo-extracted peaks
+- **experiment-e-aligned-noise.py**: Combined best approach
+- **experiment-final-combine.py**: Final model training + saving
 
 ### Root Level
-- **app.py**: Streamlit Summary Dashboard v2.0 (349 lines, 1-click auto-run pipeline)
-- **app_legacy.py**: Legacy 5-step sequential dashboard (backup, original 152-line version)
+- **app.py**: Streamlit Wizard Dashboard v2.2.0 (725 lines)
+  - 6-step wizard: Upload → Peak Extraction → Classification → Phase Detection → Toxicity → Summary
+  - One step per screen; back/forward navigation; per-step elapsed time badge
+  - `@st.cache_data` on `_parse_signal` and `_build_chart_fig` for smooth rerenders
+  - `_flow()` helper renders colored HTML flowchart diagrams per step
+  - Step 0 back-navigation: shows existing file without re-upload; new upload resets pipeline
+  - Unique button keys (`btn_nxt_{back}_{nxt}`) prevent Streamlit nav confusion
 - **test.py**: Standalone peak detection and testing
 - **peak_finder.py**: OriginLab Pro automation integration
 
@@ -150,7 +161,7 @@ Version: 1.0.0
 ```python
 def extract_features(data, window_size=31):
     """
-    Extract 85+ features from time-series data.
+    Extract 81 features from time-series data.
 
     Args:
         data (array-like): Time-series DO values
@@ -212,7 +223,7 @@ def test_extract_do_values():
     result = extract_features(sample_data)
 
     # Assert
-    assert len(result) == 85  # 85 expected features
+    assert len(result) == 81  # 81 expected features
     assert 'DO_in' in result
 ```
 
@@ -311,7 +322,7 @@ model = load('C:\\Users\\John\\model.pkl')
 ## Data Processing Standards
 
 ### Feature Engineering
-**85+ Features Extracted**:
+**81 Features Extracted (68 original + 13 robust)**:
 1. **Statistical** (mean, std, min, max, median, quantiles)
 2. **Time-Series** (autocorr, entropy, trend, seasonality)
 3. **Domain-Specific** (degradation rate, half-life, plateau metrics)
@@ -378,10 +389,10 @@ print(f"Confusion Matrix:\n{cm}")
 ## Performance Standards
 
 ### Classification Pipeline
-- **Accuracy Target**: > 85%
+- **Accuracy Target**: 84.4% (518-file)
 - **Training Time**: < 1 hour
 - **Inference Time**: < 500ms/sample
-- **Feature Count**: 70-85 engineered features
+- **Feature Count**: 81 engineered features (68 original + 13 robust)
 
 ### DO Extraction
 - **Algorithm Method**: < 1 second/sample

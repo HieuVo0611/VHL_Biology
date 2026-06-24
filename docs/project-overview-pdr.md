@@ -1,9 +1,9 @@
 # VHL Biology Project Overview & PDR
 
 **Project Name**: VHL Biology - DO Analysis & BOD Classification
-**Version**: 1.1.0
+**Version**: 1.2.0
 **Last Updated**: 2026-03-22
-**Status**: Production Ready (Pipeline Verified + Demo Dashboard)
+**Status**: Production Ready (Pipeline Verified)
 **Repository**: e:/VHL Project/Bio Zone/VHL_Biology
 
 ## Executive Summary
@@ -24,7 +24,7 @@ Provide production-ready tools for:
 - Robust data validation and matching
 
 ### Value Proposition
-- **70-85% Feature Coverage**: Comprehensive feature engineering from raw DO data
+- **81-Feature Coverage**: Comprehensive feature engineering from raw DO data (68 original + 13 robust)
 - **Multi-Model Ensemble**: RF, XGBoost, CatBoost, and LSTM for classification
 - **10x Analysis Speed**: Batch processing of TXT and Excel files
 - **Zero Manual Intervention**: Automated fuzzy matching and validation
@@ -63,7 +63,11 @@ Provide production-ready tools for:
 - Extract DO_in (entering), DO_min (minimum), DDO (delta-DO) values
 
 **FR3: Classification (from Extracted Peaks)**
-- CatBoost/RF/XGBoost classifiers on extracted peak features
+- Production CatBoost model: iter=300, lr=0.05, depth=8, balanced class weights
+- 81 features: 68 original + 13 robust statistical features
+- Trained on algorithm-extracted peaks + Gaussian noise augmentation (σ=0.08, 3x copies) + GGA oversampling (45%)
+- Validated on 518-file dataset: overall 84.4% accuracy (GGA=88.1%, Metal=82.7%)
+- Also supports RF/XGBoost classifiers for ensemble comparison
 - Classify samples as GGA or GGA-metal with confidence scores
 - Support batch prediction on new samples
 - Generate feature importance analysis
@@ -82,15 +86,19 @@ Provide production-ready tools for:
 - Calculate plateau mean for stability analysis
 - Support multiple extraction strategies
 
-**FR6: Dashboard (Summary Dashboard v2.0 — 1-Click Auto-Run)**
-- Upload TXT file (UTF-16) then click "Run Analysis" to execute full pipeline automatically
-- Auto-run: extract peaks → classify (CatBoost) → toxicity (no manual step progression)
-- Summary cards: peak count, classification + confidence, toxicity score, signal info (DO range, data points)
-- Plotly interactive DO signal chart with overlaid peak markers
-- Color-coded peaks table: BOD10=yellow, BOD5=blue
-- Toxicity panel: Stage 1/2 breakdown + formula display
+**FR6: Dashboard (Wizard Dashboard v2.2.0 — Step-by-Step)**
+- 6-step wizard: Upload → Peak Extraction → Classification → Phase Detection → Toxicity → Summary
+- One step per screen; each step requires explicit click to advance (back/forward navigation)
+- Per-step elapsed time badge; step indicator shows ✓Xs on completed steps
+- Cached signal parsing and chart building (`@st.cache_data`) for smooth rerenders
+- Step 0 back-navigation preserves loaded file — no re-upload required; new upload resets pipeline
+- Colored HTML flowchart diagrams per step (no ASCII art)
+- Step 1: DO signal chart with red ✕ peak markers + peaks table
+- Step 2: large classification result card (GGA green / GGA-Metal orange)
+- Step 3: phase distribution count cards (phase1 yellow, transition red, phase2 blue) + colored table
+- Step 4: 3-card toxicity layout (Stage 1 DDO / Toxicity % / Stage 2 DDO)
+- Step 5: 4 metric cards + time table + Excel export + "Phân tích mẫu mới" reset
 - Excel export via `src/export_excel.py`: 2 formatted sheets (Summary + Peaks)
-- Legacy 5-step workflow preserved in `app_legacy.py`
 
 **FR7: Validation**
 - Tolerance-based peak extraction validation
@@ -140,7 +148,9 @@ Provide production-ready tools for:
 - Overall mean: 85.6% @ 0.3mV (systematic bias correction tuned)
 
 ### Classification Metrics
-- Classification accuracy: > 85% on validated peaks
+- Classification accuracy: 84.4% on 518-file validation (GGA=88.1%, Metal=82.7%)
+- Model: CatBoost (iter=300, lr=0.05, depth=8, balanced weights), 81 features
+- Training: algo-extracted peaks + Gaussian noise (σ=0.08, 3x copies) + GGA oversampling (45%)
 - Feature extraction success rate: > 95%
 - Confidence scoring: calibrated with ground truth
 
@@ -158,7 +168,7 @@ Provide production-ready tools for:
 - Zero Excel dependency (TXT-only pipeline)
 
 ### User Experience Metrics
-- Dashboard usability: 1-click auto-run Summary Dashboard v2.0
+- Dashboard usability: Wizard Dashboard v2.2.0 — 6-step guided flow with per-step elapsed time
 - Average analysis time: < 10 minutes per batch
 - Error recovery success: > 95%
 
@@ -194,17 +204,18 @@ Provide production-ready tools for:
 - CSV conversion
 - Excel file reading
 
-**2. Feature Engineering Layer** (`/src/utils.py`)
-- 85+ feature extraction
+**2. Feature Engineering Layer** (`/src/utils.py` — 549 lines)
+- 81-feature extraction (68 original + 13 robust)
 - Statistical aggregation
 - Time-series transformations
 
 **3. Classification Layer** (`/code/gga_classification_model.py`)
-- RF model (70+ features)
-- XGBoost model
+- CatBoost (production): iter=300, lr=0.05, depth=8, balanced weights, 81 features
+- Trained on algo-extracted peaks + noise augmentation (σ=0.08, 3x) + GGA oversampling
+- RF and XGBoost models for ensemble comparison
 - Ensemble voting
 
-**4. DO Extraction Layer** (`/src/peak_extractor.py`)
+**4. DO Extraction Layer** (`/src/peak_extractor.py` — 448 lines)
 - Production adaptive two-pass algorithm
 - Non-HH extraction → DDO computation → conditional HH re-extraction
 - Bias correction: +0.05mV non-HH, +0.04mV HH
@@ -220,11 +231,11 @@ Provide production-ready tools for:
 - EMA with RF regressor
 - ARIMA/Linear Regression baselines
 
-**7. Dashboard Layer** (`app.py` — Summary Dashboard v2.0)
-- Streamlit UI, 1-click auto-run pipeline
-- Summary cards, Plotly signal chart, color-coded peaks table, toxicity panel
+**7. Dashboard Layer** (`app.py` — 725 lines — Wizard Dashboard v2.2.0)
+- Streamlit 6-step wizard; one step per screen with back/forward navigation
+- Per-step elapsed time; `@st.cache_data` on signal parse + Plotly figure build
+- Colored HTML flowchart diagrams per step; unique button keys prevent nav bugs
 - Excel export via src/export_excel.py (2 sheets)
-- Legacy 5-step workflow in app_legacy.py
 
 **8. Model Storage** (`/model`)
 - Serialized trained models
@@ -248,7 +259,7 @@ split into:
   │  └─ From raw time-series → forecasts
   └─ Toxicity Calculation (calculate_toxicity)
          ↓
-Streamlit Dashboard (app.py) — Summary Dashboard v2.0 (1-click auto-run)
+Streamlit Dashboard (app.py) — Wizard Dashboard v2.2.0 (6-step wizard)
          ↓
 Output: Extracted peaks, Classification, Forecasts, Toxicity
 ```
@@ -295,7 +306,7 @@ VHL_Biology/
 
 ### Python Environment
 
-**Recommended**: conda env `vhl` (pre-configured with all dependencies)
+**Recommended**: conda env `vhl` (CatBoost 1.2.8, TensorFlow 2.19.0, Keras 3.10.0)
 
 | Package | Version | Purpose |
 |---------|---------|---------|
@@ -323,6 +334,8 @@ Result: ALL STEPS PASSED ✓
 
 | Component | Feature | Status |
 |-----------|---------|--------|
+| Classification | CatBoost (prod): iter=300, lr=0.05, depth=8, 81 features, noise aug | ✅ Complete |
+| Classification | Validation: 84.4% on 518 files (GGA=88.1%, Metal=82.7%) | ✅ Complete |
 | Classification | RF model | ✅ Complete |
 | Classification | XGBoost model | ✅ Complete |
 | DO Extraction | Algorithm-based (Savitzky-Golay) | ✅ Complete |
@@ -335,7 +348,7 @@ Result: ALL STEPS PASSED ✓
 | Dashboard | File upload | ✅ Complete |
 | Dashboard | Real-time prediction | ✅ Complete |
 | Dashboard | Results export | ✅ Complete |
-| Dashboard | Summary Dashboard v2.0 (1-click, Plotly, Excel export) | ✅ Complete |
+| Dashboard | Wizard Dashboard v2.2.0 (6-step wizard, Plotly, Excel export) | ✅ Complete |
 | Validation | Fuzzy name matching | ✅ Complete |
 | Validation | Tolerance-based checking | ✅ Complete |
 
@@ -361,6 +374,8 @@ Result: ALL STEPS PASSED ✓
 - ✅ TXT-only pipeline integration (no Excel dependency)
 - ✅ Full pipeline test verified (2026-03-11): TXT → Peaks → Classification → Toxicity
 - ✅ Summary Dashboard v2.0 (2026-03-22): 1-click auto-run, Plotly chart, Excel export
+- ✅ Wizard Dashboard v2.2.0 (2026-06-21): 6-step wizard, back/forward nav, cached charts, colored flow diagrams
+- ✅ Production CatBoost classifier (v1.2.0): 81 features, noise augmentation, 84.4% on 518 files
 - 📋 Multi-model ensemble optimization
 - 📋 Enhanced forecasting accuracy
 - 📋 Automated model retraining

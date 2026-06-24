@@ -119,19 +119,20 @@ Enhance dashboard usability and visualization.
 **Estimated Effort**: 1-2 weeks
 
 #### Sub-Task 2.5: Expert Demo Dashboard (COMPLETE)
-**Status**: ✅ Complete | **Priority**: High | **Completion**: 2026-03-22
+**Status**: ✅ Complete | **Priority**: High | **Latest**: 2026-06-21 (v2.2.0)
 
-Rewrote Streamlit dashboard from 5-step sequential to 1-click Summary Dashboard for expert demos.
+**v2.2.0 — Wizard Dashboard (2026-06-21)**:
+- ✅ Rewrote app.py to 6-step wizard (725 lines): Upload → Peaks → Classification → Phase → Toxicity → Summary
+- ✅ One step per screen; back/forward navigation; per-step elapsed time badge
+- ✅ `@st.cache_data` on `_parse_signal` + `_build_chart_fig` — no redundant work on rerenders
+- ✅ `_flow()` helper — colored HTML flowchart diagrams replace ASCII art
+- ✅ Step 0 back-nav: preserves loaded file, no re-upload required
+- ✅ Unique button keys prevent Streamlit nav confusion between same-label buttons
 
-**Achievements**:
-- ✅ Rewrote app.py from 152 → 349 lines (Summary Dashboard v2.0)
-- ✅ Auto-run pipeline: upload TXT → click button → extract peaks → classify → toxicity
-- ✅ Summary cards: peak count, classification + confidence, toxicity score, signal info
-- ✅ Plotly interactive DO signal chart with peak markers
-- ✅ Color-coded peaks table (BOD10=yellow, BOD5=blue)
-- ✅ Toxicity panel with Stage 1/2 detail + formula display
-- ✅ Formatted Excel export via new module src/export_excel.py (2 sheets: Summary + Peaks)
-- ✅ Legacy backup: app_legacy.py preserves original 5-step workflow
+**v2.0 — Summary Dashboard (2026-03-22)**:
+- ✅ 1-click auto-run: upload TXT → extract peaks → classify → toxicity on one page
+- ✅ Summary cards, Plotly chart, color-coded peaks table, toxicity panel
+- ✅ Excel export via src/export_excel.py (2 sheets: Summary + Peaks)
 - ✅ Verified against known test sample: all metrics match ✓
 
 #### Sub-Task 2.6: Phase Boundary Detection (COMPLETE)
@@ -315,7 +316,7 @@ Enhanced dashboards and analysis tools.
 - ✅ Production adaptive peak extraction (93% @ 0.3mV test data)
 - ✅ TXT-only pipeline integration (no Excel dependency)
 - ✅ Comprehensive extraction accuracy benchmarking (485+ configs tested)
-- ✅ Expert Demo Dashboard (Summary Dashboard v2.0, 2026-03-22)
+- ✅ Expert Demo Dashboard (Wizard Dashboard v2.2.0, 2026-06-21)
 - ✅ Phase boundary detection (Hybrid 3-track, 98%+ accuracy for Metal/HH)
 
 ### Q2 2026 (Months 4-6)
@@ -498,6 +499,7 @@ Enhanced dashboards and analysis tools.
 | 1.1.0 | 2026-03-22 | Summary Dashboard v2.0 + Excel export, adaptive peak extraction, TXT-only pipeline, bias correction, full pipeline verified |
 | 1.2.0 | 2026-03-22 | Classification improved to 84.4%, aligned training, 81 features |
 | 1.3.0 | 2026-05-29 | Phase boundary detection (hybrid 3-track), 98%+ Metal/HH accuracy, transition-aware toxicity |
+| 1.3.1 | 2026-06-21 | Wizard Dashboard v2.2.0: 6-step wizard, back-nav fix, cached charts, colored flow diagrams |
 | 2.0.0 | Planned Q4 2026 | API, database, automation |
 | 3.0.0 | Planned 2027 | Distributed processing, real-time |
 

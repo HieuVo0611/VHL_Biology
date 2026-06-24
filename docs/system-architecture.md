@@ -302,47 +302,48 @@ Prediction
 ```
 - Notebook: `LR_BIO_VHL.ipynb`
 
-### 8. Results & Dashboard Layer (Summary Dashboard v2.0)
+### 8. Results & Dashboard Layer (Wizard Dashboard v2.2.0)
 
-**Purpose**: Present results in a single-page expert demo view with 1-click auto-run and exportable Excel report
+**Purpose**: 6-step guided wizard — one step per screen, back/forward navigation, per-step elapsed time, cached renders.
 
-**Location**: `/app.py` (Streamlit, 349 lines) | `/src/export_excel.py` (Excel generator)
+**Location**: `/app.py` (Streamlit, 725 lines) | `/src/export_excel.py` (Excel generator)
 
 **Architecture**:
 ```
-User Input: Upload .txt File (UTF-16)
+Step 0 — Upload
+   └─ _parse_signal(bytes) [@st.cache_data] → DO array + signal stats
+      Back-nav: shows existing file (no re-upload); new upload resets pipeline
    ↓
-Click "Run Analysis" → auto-execute full pipeline:
-   ├─ extract_peaks_from_txt() [src/peak_extractor.py]
-   │   └─ Output: peaks DataFrame
-   ├─ catboost_inference_from_csv() [src/utils.py]
-   │   └─ Output: GGA/GGA-metal classification + confidence
-   ├─ update_phase_tags() [src/phase_detector.py]
-   │   └─ Output: phase1 / transition / phase2 tags per peak
+Step 1 — Peak Extraction
+   └─ extract_peaks_from_txt() [src/peak_extractor.py]
+      _build_chart_fig() [@st.cache_data] → Plotly figure with red ✕ markers
+   ↓
+Step 2 — Classification
+   └─ catboost_inference_from_csv() [src/utils.py]
+      → GGA/GGA-metal + confidence %
+   ↓
+Step 3 — Phase Detection
+   └─ update_phase_tags() [src/phase_detector.py]
+      → phase1 / transition / phase2 per peak
+   ↓
+Step 4 — Toxicity
    └─ calculate_toxicity() [src/utils.py]
-       └─ Output: toxicity score (phase1 vs phase2, transition skipped)
+      → Toxicity % (phase1 vs phase2, transition skipped)
    ↓
-Summary Display (single page):
-   ├─ Summary cards: peak count, classification, toxicity score, signal info
-   ├─ Plotly interactive DO signal chart with peak markers
-   ├─ Color-coded peaks table (phase1=yellow, transition=white, phase2=blue)
-   └─ Toxicity panel: Phase 1/2 detail + formula
-   ↓
-Excel Export [src/export_excel.py]
-   ├─ Sheet 1 — Summary: sample name, classification, toxicity, signal stats
-   └─ Sheet 2 — Peaks: full peaks table with phase tagging
+Step 5 — Summary
+   ├─ 4 metric cards + processing time table
+   └─ Excel Export [src/export_excel.py]: Sheet 1 Summary + Sheet 2 Peaks
 ```
 
-**Key Advantages over Legacy 5-Step**:
-- Single-click execution (no manual step-by-step progression)
-- All results visible on one page (no accordion steps)
-- Richer visualization: Plotly chart + color-coded table
-- Formatted Excel export (2 sheets) via dedicated `src/export_excel.py`
-- Legacy 5-step preserved in `app_legacy.py`
+**Key Implementation Details**:
+- `@st.cache_data` on `_parse_signal` and `_build_chart_fig` — avoids re-work on every Streamlit rerun
+- Unique button keys `btn_nxt_{back}_{nxt}` / `btn_back_{back}_{nxt}` — prevents Streamlit confusing same-label buttons
+- `_flow(nodes)` renders colored HTML flowchart diagrams (blue input → green process → yellow decision → purple output)
+- Session state guards (`if session_state.X is None`) ensure each step's computation runs exactly once per file
 
 ## Data Flow Diagrams
 
-### End-to-End Processing Flow (TXT-Only, Summary Dashboard v2.0)
+### End-to-End Processing Flow (TXT-Only, Wizard Dashboard v2.2.0)
 
 ```
 User Input: TXT File (UTF-16)
@@ -374,7 +375,7 @@ Step 6: Toxicity Calculation
 ├─ Filtered peaks (transition excluded)
 └─ Output: Toxicity score (Phase 1 vs Phase 2)
    ↓
-Results Display (Summary Dashboard v2.0)
+Results Display (Wizard Dashboard v2.2.0)
 ├─ Summary cards (peak count, classification, toxicity, signal info)
 ├─ Plotly DO signal chart with peak markers
 ├─ Color-coded peaks table (phase1=yellow, transition=white, phase2=blue)

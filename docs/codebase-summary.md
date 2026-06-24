@@ -96,8 +96,7 @@ VHL_Biology/
 │   ├── system-architecture.md        # System design & data flow
 │   ├── codebase-summary.md           # This file
 │   └── project-roadmap.md            # Development roadmap
-├── app.py                            # Streamlit Summary Dashboard v2.0 (349 lines)
-├── app_legacy.py                     # Legacy 5-step sequential dashboard (backup)
+├── app.py                            # Streamlit Wizard Dashboard v2.2.0 (725 lines)
 ├── test.py                           # Standalone peak detection with BOD classification
 ├── peak_finder.py                    # OriginLab Pro integration (Quick Peaks gadget)
 └── requirements.txt                  # Python dependencies
@@ -250,38 +249,29 @@ python code/gga_classification_model.py
 - Legacy: Cross-references TXT filenames with Excel sample names
 - Note: Excel dependency removed from main pipeline
 
-### 8. Streamlit Dashboard (`app.py`) — Summary Dashboard v2.0
+### 8. Streamlit Dashboard (`app.py`) — Wizard Dashboard v2.2.0
 
-**Overview**: 1-click auto-run pipeline replacing the former 5-step sequential workflow. Upload a TXT file, click Run, and all results are displayed on one page.
+**Overview**: 6-step guided wizard. Each step occupies its own full screen; user clicks forward/back to navigate. Computations run lazily on first visit and are cached in session state.
 
-**Features**:
-- Auto-run pipeline: upload → button → extract peaks → classify → toxicity (no manual steps)
-- Summary cards: peak count, classification result + confidence, toxicity score, signal info (DO range, data points)
-- Plotly interactive DO signal chart with overlaid peak markers
-- Color-coded peaks table: BOD10 = yellow, BOD5 = blue
-- Toxicity panel with Stage 1/2 breakdown + formula display
-- Excel export via `src/export_excel.py`: 2 formatted sheets (Summary + Peaks, openpyxl)
+**Steps**:
+1. **Upload** — file uploader; parses DO array, shows signal preview. Back-navigation shows existing file (no re-upload).
+2. **Peak Extraction** — runs `extract_peaks_from_txt()`; shows DO chart with red ✕ markers + peaks table.
+3. **Classification** — runs `catboost_inference_from_csv()`; large result card (GGA green / GGA-Metal orange).
+4. **Phase Detection** — runs `update_phase_tags()`; count cards per phase + color-coded table.
+5. **Toxicity** — runs `calculate_toxicity()`; 3-card layout (Stage 1 DDO / Toxicity % / Stage 2 DDO).
+6. **Summary** — 4 metric cards, time table, Excel export, "Phân tích mẫu mới" reset.
 
-**Key Components (Summary Dashboard v2.0)**:
-```python
-1. Upload .txt File (UTF-16)
-2. Click "Run Analysis" → auto-execute full pipeline:
-   a. extract_peaks_from_txt() [src/peak_extractor.py]
-   b. catboost_inference_from_csv() [src/utils.py]
-   c. calculate_toxicity() [src/utils.py]
-3. Display: Summary cards, Plotly signal chart, color-coded peaks table, toxicity panel
-4. Export: Excel report (src/export_excel.py) — 2 sheets: Summary + Peaks
-```
+**Key Technical Decisions**:
+- `@st.cache_data` on `_parse_signal(bytes)` and `_build_chart_fig(array, peaks, height)` — avoids re-work on rerenders
+- Unique button keys `btn_nxt_{back}_{nxt}` per step — prevents Streamlit confusing identical button labels
+- `_flow(nodes)` helper — renders colored HTML flowchart boxes per step (not ASCII)
+- Step 0 elif branch: if `session_state.file_bytes is not None` → show existing file + "Tiếp tục" without forcing re-upload
 
-**New Module: `src/export_excel.py`**:
-- Generates formatted Excel workbook with openpyxl
+**Module: `src/export_excel.py`**:
 - Sheet 1 (Summary): sample name, classification, toxicity, signal stats
-- Sheet 2 (Peaks): full peaks table with BOD10/BOD5 color coding
+- Sheet 2 (Peaks): full peaks table with phase color coding
 
-**Legacy Backup**:
-- `app_legacy.py`: original 5-step sequential dashboard preserved for reference
-
-**Size**: `app.py` is 349 lines (was 152 lines in v1.0)
+**Size**: `app.py` is 725 lines (v2.2.0); was 349 lines (Summary Dashboard v2.0)
 
 **Model Paths Configuration**:
 - LSTM model: `model/LSTM Model/28_07_2025/enc-dec_lstm_model.h5`

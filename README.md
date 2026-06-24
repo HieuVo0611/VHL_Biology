@@ -1,6 +1,6 @@
 # VHL Biology Project
 
-**Version**: 1.2.0 | **Last Updated**: 2026-03-22 | **Status**: Production Ready
+**Version**: 1.3.1 | **Last Updated**: 2026-06-21 | **Status**: Production Ready
 
 Production ML system for dissolved oxygen (DO) analysis. Classifies biological samples (GGA vs GGA-metal), extracts DO peaks using adaptive two-pass algorithm, and predicts BOD metrics—entirely from TXT file uploads with no Excel dependency.
 
@@ -18,7 +18,7 @@ conda activate vhl
 ```bash
 streamlit run app.py
 ```
-Dashboard walks you through: Upload TXT → Extract Peaks → LSTM → Classification → Toxicity.
+Dashboard walks you through a 6-step wizard: Upload → Peak Extraction → Classification → Phase Detection → Toxicity → Summary.
 
 ## Project Overview
 
@@ -75,7 +75,7 @@ VHL_Biology/
 │   └── ext_v16_*.csv              # Algorithm-extracted peaks
 ├── docs/                          # Documentation
 ├── plans/reports/                 # Optimization reports & Vietnamese progress reports
-└── app.py                         # Streamlit 5-step TXT-only dashboard (152 lines)
+└── app.py                         # Streamlit Wizard Dashboard v2.2.0 (725 lines, 6-step)
 ```
 
 ## Key Features
@@ -85,7 +85,7 @@ VHL_Biology/
 - **Phase Detection**: Hybrid 3-track ML/algorithm (RandomForest Metal/HH, constrained change-point GGA)
 - **Time-Series**: LSTM encoder-decoder (lookback=7, Huber loss)
 - **Toxicity**: Phase1 vs phase2 calculation (transition rows excluded)
-- **Dashboard**: Summary Dashboard v2.0 (1-click TXT upload → auto-run → Summary cards + Excel export)
+- **Dashboard**: Wizard Dashboard v2.2.0 (6-step wizard, back/forward nav, per-step timing, cached charts, colored flow diagrams)
 - **Validation**: Tolerance-based peak matching, phase boundary ±1 = 98%+ (Metal/HH)
 
 ## Production Pipeline
