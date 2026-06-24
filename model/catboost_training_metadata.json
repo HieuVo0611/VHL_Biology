@@ -1,0 +1,11 @@
+{
+  "date": "2026-03-22T20:33:29.313823",
+  "experiment": "E1: Algo + noise s=0.08 3x + oversample(45%)",
+  "sigma": 0.08,
+  "copies": 3,
+  "ratio": 0.45,
+  "cv_accuracy": "0.8600+-0.0264",
+  "gga_recall": "90.6%",
+  "metal_recall": "81.8%",
+  "training_data": "algo-extracted 518 files + noise + oversample"
+}
