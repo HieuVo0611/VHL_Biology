@@ -171,3 +171,18 @@ def test_export_without_peaks_returns_409():
     sid = _new_session()
     resp = client.get(f"/session/{sid}/export")
     assert resp.status_code == 409
+
+
+def test_export_with_non_ascii_filename_returns_200():
+    sid = _new_session()
+    with open(SAMPLE_TXT, "rb") as f:
+        client.post(
+            f"/session/{sid}/upload",
+            files={"file": ("mẫu-thử-nghiệm.txt", f, "text/plain")},
+        )
+    client.post(f"/session/{sid}/peaks")
+    client.post(f"/session/{sid}/classify")
+    client.post(f"/session/{sid}/phase")
+    client.post(f"/session/{sid}/toxicity")
+    resp = client.get(f"/session/{sid}/export")
+    assert resp.status_code == 200

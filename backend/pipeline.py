@@ -3,6 +3,7 @@
 import os
 import tempfile
 from typing import Any, Dict
+from urllib.parse import quote
 
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -22,6 +23,12 @@ from src.phase_detector import update_phase_tags
 from src.utils import calculate_bod_from_calibration, calculate_toxicity, catboost_inference_from_csv, extract_peaks_from_txt
 
 router = APIRouter()
+
+
+def _safe_content_disposition(filename: str) -> str:
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii").replace('"', "") or "report.xlsx"
+    utf8_quoted = quote(filename)
+    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{utf8_quoted}'
 
 
 def require_session(session_id: str) -> Dict[str, Any]:
@@ -64,7 +71,7 @@ def export_report(session_id: str):
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": _safe_content_disposition(filename)},
     )
 
 
