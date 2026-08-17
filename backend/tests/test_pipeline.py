@@ -17,3 +17,27 @@ def test_create_session_returns_session_id():
 def test_unknown_session_id_returns_404():
     resp = client.get("/session/does-not-exist/export")
     assert resp.status_code == 404
+
+
+SAMPLE_TXT = "data/GGA/File txt/N4-VS1-25-03-2024/10-5/N4-10-5-01042024-Q=49.81mL_phút-3.txt"
+
+
+def _new_session() -> str:
+    return client.post("/session").json()["session_id"]
+
+
+def test_upload_returns_signal_stats():
+    sid = _new_session()
+    with open(SAMPLE_TXT, "rb") as f:
+        resp = client.post(f"/session/{sid}/upload", files={"file": ("sample.txt", f, "text/plain")})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["signal_points"] > 0
+    assert body["do_min"] <= body["do_max"]
+    assert len(body["do_array"]) == body["signal_points"]
+
+
+def test_upload_missing_session_returns_404():
+    with open(SAMPLE_TXT, "rb") as f:
+        resp = client.post("/session/does-not-exist/upload", files={"file": ("sample.txt", f, "text/plain")})
+    assert resp.status_code == 404
