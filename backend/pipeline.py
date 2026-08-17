@@ -7,10 +7,10 @@ from typing import Any, Dict
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from backend.schemas import ClassifyResponse, SessionCreateResponse, UploadResponse
+from backend.schemas import ClassifyResponse, SessionCreateResponse, ToxicityResponse, UploadResponse
 from backend.session_store import store
 from src.phase_detector import update_phase_tags
-from src.utils import catboost_inference_from_csv, extract_peaks_from_txt
+from src.utils import calculate_toxicity, catboost_inference_from_csv, extract_peaks_from_txt
 
 router = APIRouter()
 
@@ -135,3 +135,27 @@ def detect_phase(session_id: str):
     peaks_df = update_phase_tags(session["peaks_df"], session["cls_pred"])
     session["peaks_df"] = peaks_df
     return peaks_df.where(pd.notnull(peaks_df), None).to_dict(orient="records")
+
+
+@router.post("/session/{session_id}/toxicity", response_model=ToxicityResponse)
+def toxicity(session_id: str):
+    session = require_session(session_id)
+    peaks_df = session.get("peaks_df")
+    if peaks_df is None or "phase_confidence" not in peaks_df.columns:
+        raise HTTPException(status_code=409, detail="Run phase detection before toxicity")
+
+    tox_df = calculate_toxicity(peaks_df)
+    tox_row = tox_df.iloc[0] if len(tox_df) > 0 else None
+    tox_val = (float(tox_row["Toxicity (%)"])
+               if tox_row is not None and pd.notna(tox_row["Toxicity (%)"]) else None)
+    stage1 = tox_row["Stage 1"] if tox_row is not None else None
+    stage2 = tox_row["Stage 2"] if tox_row is not None else None
+
+    s1_peaks = peaks_df[peaks_df["Tag"].str.strip() == str(stage1).strip()] if stage1 else pd.DataFrame()
+    s2_peaks = peaks_df[peaks_df["Tag"].str.strip() == str(stage2).strip()] if stage2 else pd.DataFrame()
+    s1_ddo = float(s1_peaks["DDO (mV)"].mean()) if not s1_peaks.empty else None
+    s2_ddo = float(s2_peaks["DDO (mV)"].mean()) if not s2_peaks.empty else None
+
+    session.update(toxicity_df=tox_df, tox_val=tox_val, stage1_tag=stage1, stage2_tag=stage2,
+                    s1_ddo=s1_ddo, s2_ddo=s2_ddo)
+    return ToxicityResponse(tox_val=tox_val, stage1=stage1, stage2=stage2, s1_ddo=s1_ddo, s2_ddo=s2_ddo)

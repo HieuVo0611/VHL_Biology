@@ -105,3 +105,24 @@ def test_phase_without_classification_returns_409():
     sid = _session_with_peaks()
     resp = client.post(f"/session/{sid}/phase")
     assert resp.status_code == 409
+
+
+def _session_with_phase() -> str:
+    sid = _session_with_classification()
+    client.post(f"/session/{sid}/phase")
+    return sid
+
+
+def test_toxicity_returns_value():
+    sid = _session_with_phase()
+    resp = client.post(f"/session/{sid}/toxicity")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stage1"] is not None
+    assert body["stage2"] is not None
+
+
+def test_toxicity_without_phase_returns_409():
+    sid = _session_with_classification()
+    resp = client.post(f"/session/{sid}/toxicity")
+    assert resp.status_code == 409
