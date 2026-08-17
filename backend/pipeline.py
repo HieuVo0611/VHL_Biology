@@ -7,9 +7,9 @@ from typing import Any, Dict
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from backend.schemas import SessionCreateResponse, UploadResponse
+from backend.schemas import ClassifyResponse, SessionCreateResponse, UploadResponse
 from backend.session_store import store
-from src.utils import extract_peaks_from_txt
+from src.utils import catboost_inference_from_csv, extract_peaks_from_txt
 
 router = APIRouter()
 
@@ -104,3 +104,20 @@ def extract_peaks(session_id: str):
 
     session["peaks_df"] = peaks_df
     return peaks_df.where(pd.notnull(peaks_df), None).to_dict(orient="records")
+
+
+@router.post("/session/{session_id}/classify", response_model=ClassifyResponse)
+def classify(session_id: str):
+    session = require_session(session_id)
+    if session.get("peaks_df") is None:
+        raise HTTPException(status_code=409, detail="Extract peaks before classifying")
+
+    results = catboost_inference_from_csv(
+        session["peaks_df"],
+        model_path="model/catboost_model.cbm",
+        label_encoder_path="model/label_encoder_classes.npy",
+    )
+    _, pred, prob = results[0]
+    session["cls_pred"] = str(pred)
+    session["cls_prob"] = float(prob.max())
+    return ClassifyResponse(cls_pred=session["cls_pred"], cls_prob=session["cls_prob"])

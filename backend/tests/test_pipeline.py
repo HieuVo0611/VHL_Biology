@@ -63,3 +63,24 @@ def test_peaks_without_upload_returns_409():
     sid = _new_session()
     resp = client.post(f"/session/{sid}/peaks")
     assert resp.status_code == 409
+
+
+def _session_with_peaks() -> str:
+    sid = _session_with_upload()
+    client.post(f"/session/{sid}/peaks")
+    return sid
+
+
+def test_classify_returns_prediction():
+    sid = _session_with_peaks()
+    resp = client.post(f"/session/{sid}/classify")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cls_pred"].lower() in ("gga", "metal")
+    assert 0.0 <= body["cls_prob"] <= 1.0
+
+
+def test_classify_without_peaks_returns_409():
+    sid = _new_session()
+    resp = client.post(f"/session/{sid}/classify")
+    assert resp.status_code == 409
