@@ -84,3 +84,24 @@ def test_classify_without_peaks_returns_409():
     sid = _new_session()
     resp = client.post(f"/session/{sid}/classify")
     assert resp.status_code == 409
+
+
+def _session_with_classification() -> str:
+    sid = _session_with_peaks()
+    client.post(f"/session/{sid}/classify")
+    return sid
+
+
+def test_phase_tags_peaks():
+    sid = _session_with_classification()
+    resp = client.post(f"/session/{sid}/phase")
+    assert resp.status_code == 200
+    rows = resp.json()
+    tags = {row["Tag"] for row in rows}
+    assert tags <= {"phase1", "transition", "phase2"}
+
+
+def test_phase_without_classification_returns_409():
+    sid = _session_with_peaks()
+    resp = client.post(f"/session/{sid}/phase")
+    assert resp.status_code == 409

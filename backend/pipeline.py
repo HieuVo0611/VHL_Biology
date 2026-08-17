@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from backend.schemas import ClassifyResponse, SessionCreateResponse, UploadResponse
 from backend.session_store import store
+from src.phase_detector import update_phase_tags
 from src.utils import catboost_inference_from_csv, extract_peaks_from_txt
 
 router = APIRouter()
@@ -121,3 +122,16 @@ def classify(session_id: str):
     session["cls_pred"] = str(pred)
     session["cls_prob"] = float(prob.max())
     return ClassifyResponse(cls_pred=session["cls_pred"], cls_prob=session["cls_prob"])
+
+
+@router.post("/session/{session_id}/phase")
+def detect_phase(session_id: str):
+    session = require_session(session_id)
+    if session.get("peaks_df") is None:
+        raise HTTPException(status_code=409, detail="Extract peaks before phase detection")
+    if session.get("cls_pred") is None:
+        raise HTTPException(status_code=409, detail="Classify before phase detection")
+
+    peaks_df = update_phase_tags(session["peaks_df"], session["cls_pred"])
+    session["peaks_df"] = peaks_df
+    return peaks_df.where(pd.notnull(peaks_df), None).to_dict(orient="records")
