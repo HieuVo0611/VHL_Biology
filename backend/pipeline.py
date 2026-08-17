@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from backend.schemas import SessionCreateResponse, UploadResponse
 from backend.session_store import store
+from src.utils import extract_peaks_from_txt
 
 router = APIRouter()
 
@@ -83,3 +84,23 @@ async def upload_file(session_id: str, file: UploadFile = File(...)):
         do_max=do_max,
         do_array=do_array.tolist(),
     )
+
+
+@router.post("/session/{session_id}/peaks")
+def extract_peaks(session_id: str):
+    session = require_session(session_id)
+    if "file_bytes" not in session:
+        raise HTTPException(status_code=409, detail="Upload a file before extracting peaks")
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+    tmp.write(session["file_bytes"])
+    tmp.close()
+    try:
+        peaks_df = extract_peaks_from_txt(tmp.name)
+        for col in ("Doin (mV)", "No.peak", "DOmin (mV)", "DDO (mV)"):
+            peaks_df[col] = pd.to_numeric(peaks_df[col], errors="coerce")
+    finally:
+        os.unlink(tmp.name)
+
+    session["peaks_df"] = peaks_df
+    return peaks_df.where(pd.notnull(peaks_df), None).to_dict(orient="records")

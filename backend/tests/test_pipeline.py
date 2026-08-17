@@ -41,3 +41,25 @@ def test_upload_missing_session_returns_404():
     with open(SAMPLE_TXT, "rb") as f:
         resp = client.post("/session/does-not-exist/upload", files={"file": ("sample.txt", f, "text/plain")})
     assert resp.status_code == 404
+
+
+def _session_with_upload() -> str:
+    sid = _new_session()
+    with open(SAMPLE_TXT, "rb") as f:
+        client.post(f"/session/{sid}/upload", files={"file": ("sample.txt", f, "text/plain")})
+    return sid
+
+
+def test_peaks_returns_rows_with_ddo():
+    sid = _session_with_upload()
+    resp = client.post(f"/session/{sid}/peaks")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) > 0
+    assert "DDO (mV)" in rows[0]
+
+
+def test_peaks_without_upload_returns_409():
+    sid = _new_session()
+    resp = client.post(f"/session/{sid}/peaks")
+    assert resp.status_code == 409
