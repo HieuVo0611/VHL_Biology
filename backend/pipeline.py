@@ -7,10 +7,17 @@ from typing import Any, Dict
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from backend.schemas import ClassifyResponse, SessionCreateResponse, ToxicityResponse, UploadResponse
+from backend.schemas import (
+    BodCalibrationRequest,
+    BodResponse,
+    ClassifyResponse,
+    SessionCreateResponse,
+    ToxicityResponse,
+    UploadResponse,
+)
 from backend.session_store import store
 from src.phase_detector import update_phase_tags
-from src.utils import calculate_toxicity, catboost_inference_from_csv, extract_peaks_from_txt
+from src.utils import calculate_bod_from_calibration, calculate_toxicity, catboost_inference_from_csv, extract_peaks_from_txt
 
 router = APIRouter()
 
@@ -159,3 +166,31 @@ def toxicity(session_id: str):
     session.update(toxicity_df=tox_df, tox_val=tox_val, stage1_tag=stage1, stage2_tag=stage2,
                     s1_ddo=s1_ddo, s2_ddo=s2_ddo)
     return ToxicityResponse(tox_val=tox_val, stage1=stage1, stage2=stage2, s1_ddo=s1_ddo, s2_ddo=s2_ddo)
+
+
+@router.post("/session/{session_id}/bod", response_model=BodResponse)
+def bod_calibration(session_id: str, payload: BodCalibrationRequest):
+    session = require_session(session_id)
+    peaks_df = session.get("peaks_df")
+    if peaks_df is None or "phase_confidence" not in peaks_df.columns:
+        raise HTTPException(status_code=409, detail="Run phase detection before BOD calibration")
+
+    p1 = peaks_df[peaks_df["Tag"].str.strip() == "phase1"]
+    p2 = peaks_df[peaks_df["Tag"].str.strip() == "phase2"]
+    ddo_p1 = float(p1["DDO (mV)"].mean()) if not p1.empty else None
+    ddo_p2 = float(p2["DDO (mV)"].mean()) if not p2.empty else None
+    if ddo_p1 is None or ddo_p2 is None:
+        raise HTTPException(status_code=409, detail="No phase1/phase2 peaks found")
+
+    try:
+        result = calculate_bod_from_calibration(
+            ddo_phase1=ddo_p1, ddo_phase2=ddo_p2,
+            bod1_cal=payload.bod1, ddo1_cal=payload.ddo1,
+            bod2_cal=payload.bod2, ddo2_cal=payload.ddo2,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    session.update(bod_phase1=result["bod_phase1"], bod_phase2=result["bod_phase2"],
+                    bod_a=result["a"], bod_b=result["b"])
+    return BodResponse(**result)

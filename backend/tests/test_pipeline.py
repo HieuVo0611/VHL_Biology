@@ -126,3 +126,32 @@ def test_toxicity_without_phase_returns_409():
     sid = _session_with_classification()
     resp = client.post(f"/session/{sid}/toxicity")
     assert resp.status_code == 409
+
+
+def test_bod_calibration_returns_values():
+    sid = _session_with_phase()
+    resp = client.post(
+        f"/session/{sid}/bod",
+        json={"bod1": 20.0, "ddo1": 11.3, "bod2": 15.0, "ddo2": 9.13},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "bod_phase1" in body and "bod_phase2" in body
+
+
+def test_bod_calibration_equal_bod_values_returns_422():
+    sid = _session_with_phase()
+    resp = client.post(
+        f"/session/{sid}/bod",
+        json={"bod1": 20.0, "ddo1": 11.3, "bod2": 20.0, "ddo2": 9.13},
+    )
+    assert resp.status_code == 422
+
+
+def test_bod_calibration_without_phase_returns_409():
+    sid = _session_with_classification()
+    resp = client.post(
+        f"/session/{sid}/bod",
+        json={"bod1": 20.0, "ddo1": 11.3, "bod2": 15.0, "ddo2": 9.13},
+    )
+    assert resp.status_code == 409
