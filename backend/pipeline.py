@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 from backend.schemas import (
     BodCalibrationRequest,
@@ -16,6 +17,7 @@ from backend.schemas import (
     UploadResponse,
 )
 from backend.session_store import store
+from src.export_excel import generate_excel_report
 from src.phase_detector import update_phase_tags
 from src.utils import calculate_bod_from_calibration, calculate_toxicity, catboost_inference_from_csv, extract_peaks_from_txt
 
@@ -36,9 +38,34 @@ def create_session():
 
 
 @router.get("/session/{session_id}/export")
-def export_placeholder(session_id: str):
-    require_session(session_id)
-    raise HTTPException(status_code=409, detail="Nothing to export yet")
+def export_report(session_id: str):
+    session = require_session(session_id)
+    peaks_df = session.get("peaks_df")
+    if peaks_df is None:
+        raise HTTPException(status_code=409, detail="Nothing to export yet")
+
+    buffer = generate_excel_report(
+        sample_name=session.get("sample_name", "sample"),
+        peaks_df=peaks_df,
+        classification=session.get("cls_pred") or "unknown",
+        probability=session.get("cls_prob") or 0.0,
+        toxicity_pct=session.get("tox_val"),
+        stage1_tag=session.get("stage1_tag"),
+        stage1_ddo_avg=session.get("s1_ddo"),
+        stage2_tag=session.get("stage2_tag"),
+        stage2_ddo_avg=session.get("s2_ddo"),
+        signal_points=session.get("signal_points", 0),
+        do_min=session.get("do_min", 0.0),
+        do_max=session.get("do_max", 0.0),
+        bod_phase1=session.get("bod_phase1"),
+        bod_phase2=session.get("bod_phase2"),
+    )
+    filename = f"{session.get('sample_name', 'report')}.xlsx"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _parse_signal(file_bytes: bytes):

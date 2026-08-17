@@ -155,3 +155,19 @@ def test_bod_calibration_without_phase_returns_409():
         json={"bod1": 20.0, "ddo1": 11.3, "bod2": 15.0, "ddo2": 9.13},
     )
     assert resp.status_code == 409
+
+
+def test_export_returns_xlsx():
+    sid = _session_with_phase()
+    client.post(f"/session/{sid}/toxicity")
+    resp = client.get(f"/session/{sid}/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+def test_export_without_peaks_returns_409():
+    sid = _new_session()
+    resp = client.get(f"/session/{sid}/export")
+    assert resp.status_code == 409
