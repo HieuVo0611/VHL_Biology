@@ -1,0 +1,29 @@
+# Dockerfile.combined — single-container image running both the FastAPI
+# backend (internal, port 8000) and the Streamlit frontend (public, $PORT).
+# Used to fit within a single Render free-tier instance-hour allowance.
+# Build: docker build -f Dockerfile.combined -t vhl-combined .
+# Run:   docker run -e PORT=8501 -p 8501:8501 vhl-combined
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt backend/requirements.txt
+COPY requirements-frontend.txt requirements-frontend.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt -r requirements-frontend.txt
+
+COPY backend/ backend/
+COPY src/ src/
+COPY model/ model/
+COPY app.py .
+COPY backend_client.py .
+COPY .streamlit/ .streamlit/
+COPY start.sh .
+
+ENV BACKEND_URL=http://localhost:8000
+ENV PORT=8501
+
+EXPOSE 8501
+CMD ["sh", "start.sh"]
