@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: vhl-biology-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: FRONTEND_ORIGIN
+        value: https://vhl-biology-frontend.onrender.com
+
+  - type: web
+    name: vhl-biology-frontend
+    runtime: docker
+    dockerfilePath: ./Dockerfile.frontend
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: BACKEND_URL
+        value: https://vhl-biology-backend.onrender.com
