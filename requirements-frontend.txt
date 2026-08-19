@@ -1,0 +1,8 @@
+# Frontend-only dependencies for the Streamlit app (app.py + backend_client.py).
+# Deliberately excludes heavy backend/training deps (tensorflow, catboost, scipy, scikit-learn).
+# Pins mirror requirements.txt versions for direct deps; transitive pins added as needed by pip.
+streamlit==1.47.1
+pandas==2.3.1
+numpy==2.0.2
+plotly==6.2.0
+requests==2.32.4

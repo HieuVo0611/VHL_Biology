@@ -4,8 +4,6 @@ Purpose: VHL Biology — step-by-step analysis wizard. One step per screen,
          time elapsed per step, back/forward navigation.
 Version: 2.2.0
 """
-import os
-import tempfile
 import time
 
 import streamlit as st
@@ -13,10 +11,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-from src.utils import (extract_peaks_from_txt, catboost_inference_from_csv,
-                        calculate_toxicity, calculate_bod_from_calibration)
-from src.phase_detector import update_phase_tags
-from src.export_excel import generate_excel_report
+import backend_client as client
+from backend_client import BackendError
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="VHL Biology Analysis", layout="wide", page_icon="🔬")
@@ -49,6 +45,7 @@ st.markdown("""<style>
 # ── Session state defaults ────────────────────────────────────────────────────
 _DEFAULTS: dict = dict(
     step=0,
+    session_id=None, export_bytes=None,
     file_bytes=None, sample_name=None,
     do_array=None, signal_points=None, do_min=None, do_max=None,
     peaks_df=None,
@@ -211,34 +208,6 @@ def _color_tag(row):
         return ["background-color:#DBEAFE"] * len(row)
     return [""] * len(row)
 
-# ── Parse signal bytes to DO array (cached) ───────────────────────────────────
-@st.cache_data(show_spinner=False)
-def _parse_signal(file_bytes: bytes) -> tuple:
-    tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
-    tmp.write(file_bytes)
-    tmp.close()
-    try:
-        try:
-            raw = pd.read_csv(tmp.name, sep="\t", header=None, usecols=[0, 1],
-                              names=["Time", "DO"], encoding="utf-16")
-        except UnicodeError:
-            rows = []
-            with open(tmp.name) as f:
-                for line in f:
-                    p = line.split()
-                    if len(p) >= 2:
-                        try:
-                            rows.append((float(p[0].replace("\x00", "")),
-                                         float(p[1].replace("\x00", ""))))
-                        except ValueError:
-                            pass
-            raw = pd.DataFrame(rows, columns=["Time", "DO"])
-        do = raw["DO"].values
-        return do, len(raw), float(do.min()), float(do.max())
-    finally:
-        os.unlink(tmp.name)
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  STEP 0 — UPLOAD
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -275,15 +244,21 @@ def render_step_0():
                 with st.spinner("Đang đọc tín hiệu..."):
                     uploaded.seek(0)
                     file_bytes = uploaded.read()
-                    do_array, pts, do_min, do_max = _parse_signal(file_bytes)
+                    try:
+                        session_id = client.create_session()
+                        resp = client.upload(session_id, uploaded.name, file_bytes)
+                    except BackendError as e:
+                        st.error(str(e))
+                        st.stop()
                 st.session_state.update(dict(
-                    file_bytes=file_bytes, sample_name=name,
-                    do_array=do_array, signal_points=pts,
-                    do_min=do_min, do_max=do_max,
+                    session_id=session_id,
+                    file_bytes=file_bytes, sample_name=resp["sample_name"],
+                    do_array=np.array(resp["do_array"]), signal_points=resp["signal_points"],
+                    do_min=resp["do_min"], do_max=resp["do_max"],
                     peaks_df=None, cls_pred=None, cls_prob=None,
                     cls_error=None, phase_error=None, toxicity_df=None,
                     tox_val=None, stage1_tag=None, stage2_tag=None,
-                    s1_ddo=None, s2_ddo=None, step_times={},
+                    s1_ddo=None, s2_ddo=None, step_times={}, export_bytes=None,
                 ))
 
             if st.session_state.do_array is not None:
@@ -342,17 +317,13 @@ def render_step_1():
         if st.session_state.peaks_df is None:
             with st.spinner("Đang trích xuất peak..."):
                 t0 = time.time()
-                tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
-                tmp.write(st.session_state.file_bytes)
-                tmp.close()
                 try:
-                    peaks_df = extract_peaks_from_txt(tmp.name)
-                    for col in ("Doin (mV)", "No.peak", "DOmin (mV)", "DDO (mV)"):
-                        peaks_df[col] = pd.to_numeric(peaks_df[col], errors="coerce")
-                    st.session_state.peaks_df = peaks_df
+                    records = client.extract_peaks(st.session_state.session_id)
+                    st.session_state.peaks_df = client.records_to_df(records)
                     st.session_state.step_times[1] = round(time.time() - t0, 2)
-                finally:
-                    os.unlink(tmp.name)
+                except BackendError as e:
+                    st.error(str(e))
+                    st.stop()
 
         peaks_df = st.session_state.peaks_df
         elapsed = st.session_state.step_times.get(1)
@@ -413,14 +384,9 @@ def render_step_2():
             with st.spinner("Đang phân loại mẫu..."):
                 t0 = time.time()
                 try:
-                    results = catboost_inference_from_csv(
-                        st.session_state.peaks_df,
-                        model_path="model/catboost_model.cbm",
-                        label_encoder_path="model/label_encoder_classes.npy",
-                    )
-                    _, pred, prob = results[0]
-                    st.session_state.cls_pred = str(pred)
-                    st.session_state.cls_prob = float(prob.max())
+                    resp = client.classify(st.session_state.session_id)
+                    st.session_state.cls_pred = resp["cls_pred"]
+                    st.session_state.cls_prob = resp["cls_prob"]
                 except Exception as e:
                     st.session_state.cls_pred = "Lỗi"
                     st.session_state.cls_prob = 0.0
@@ -497,11 +463,8 @@ def render_step_3():
             with st.spinner("Đang phát hiện ranh giới pha..."):
                 t0 = time.time()
                 try:
-                    peaks_df = update_phase_tags(
-                        st.session_state.peaks_df,
-                        st.session_state.cls_pred or "GGA",
-                    )
-                    st.session_state.peaks_df = peaks_df
+                    records = client.detect_phase(st.session_state.session_id)
+                    st.session_state.peaks_df = client.records_to_df(records)
                 except Exception as e:
                     st.session_state.phase_error = str(e)
                 st.session_state.step_times[3] = round(time.time() - t0, 2)
@@ -591,28 +554,31 @@ def render_step_4():
         if st.session_state.toxicity_df is None:
             with st.spinner("Đang tính độc tính..."):
                 t0 = time.time()
-                st.session_state.toxicity_df = calculate_toxicity(st.session_state.peaks_df)
+                try:
+                    resp = client.toxicity(st.session_state.session_id)
+                except BackendError as e:
+                    st.error(str(e))
+                    st.stop()
+                st.session_state.toxicity_df = True  # marks this step as computed
+                st.session_state.update(dict(
+                    tox_val=resp["tox_val"], stage1_tag=resp["stage1"],
+                    stage2_tag=resp["stage2"], s1_ddo=resp["s1_ddo"], s2_ddo=resp["s2_ddo"],
+                ))
                 st.session_state.step_times[4] = round(time.time() - t0, 2)
 
         elapsed = st.session_state.step_times.get(4)
         if elapsed:
             st.markdown(f'<span class="elapsed-badge">⏱ {elapsed}s</span>', unsafe_allow_html=True)
 
-        tox_df = st.session_state.toxicity_df
-        tox_row = tox_df.iloc[0] if tox_df is not None and len(tox_df) > 0 else None
-        tox_val  = tox_row["Toxicity (%)"] if tox_row is not None and pd.notna(tox_row["Toxicity (%)"]) else None
-        stage1   = tox_row["Stage 1"]     if tox_row is not None else None
-        stage2   = tox_row["Stage 2"]     if tox_row is not None else None
+        tox_val = st.session_state.tox_val
+        stage1 = st.session_state.stage1_tag
+        stage2 = st.session_state.stage2_tag
+        s1_ddo = st.session_state.s1_ddo
+        s2_ddo = st.session_state.s2_ddo
 
         peaks_df = st.session_state.peaks_df
         s1_peaks = peaks_df[peaks_df["Tag"].str.strip() == str(stage1).strip()] if stage1 else pd.DataFrame()
         s2_peaks = peaks_df[peaks_df["Tag"].str.strip() == str(stage2).strip()] if stage2 else pd.DataFrame()
-        s1_ddo   = float(s1_peaks["DDO (mV)"].mean()) if not s1_peaks.empty else None
-        s2_ddo   = float(s2_peaks["DDO (mV)"].mean()) if not s2_peaks.empty else None
-
-        # Cache for summary step
-        st.session_state.update(dict(tox_val=tox_val, stage1_tag=stage1,
-                                     stage2_tag=stage2, s1_ddo=s1_ddo, s2_ddo=s2_ddo))
 
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -700,10 +666,9 @@ def render_step_4_bod():
             st.warning("Nhập đầy đủ 4 giá trị > 0 để tính.")
         else:
             try:
-                res = calculate_bod_from_calibration(
-                    ddo_phase1=ddo_p1, ddo_phase2=ddo_p2,
-                    bod1_cal=bod1, ddo1_cal=ddo1,
-                    bod2_cal=bod2, ddo2_cal=ddo2,
+                res = client.bod_calibration(
+                    st.session_state.session_id,
+                    bod1=bod1, ddo1=ddo1, bod2=bod2, ddo2=ddo2,
                 )
                 st.session_state.update(dict(
                     bod_phase1=res["bod_phase1"],
@@ -725,7 +690,7 @@ def render_step_4_bod():
                           help=f"DDO phase1 = {ddo_p1:.3f} mV")
                 c2.metric("BOD Phase 2", f"{res['bod_phase2']:.3f} mg/L",
                           help=f"DDO phase2 = {ddo_p2:.3f} mV")
-            except ValueError as e:
+            except BackendError as e:
                 st.error(str(e))
 
     st.markdown("---")
@@ -815,31 +780,21 @@ def render_step_5():
     st.markdown("---")
 
     # ── Export + Reset ────────────────────────────────────────────────────────
-    excel_buf = generate_excel_report(
-        sample_name=st.session_state.sample_name or "Unknown",
-        peaks_df=peaks_df,
-        classification=_LABEL_DISPLAY.get(st.session_state.cls_pred or "", st.session_state.cls_pred or "N/A"),
-        probability=st.session_state.cls_prob or 0.0,
-        toxicity_pct=tox_val if not is_organic else None,
-        stage1_tag=stage1,
-        stage1_ddo_avg=s1_ddo,
-        stage2_tag=stage2,
-        stage2_ddo_avg=s2_ddo,
-        signal_points=st.session_state.signal_points or 0,
-        do_min=st.session_state.do_min or 0.0,
-        do_max=st.session_state.do_max or 0.0,
-        bod_phase1=st.session_state.bod_phase1,
-        bod_phase2=st.session_state.bod_phase2,
-    )
+    if st.session_state.export_bytes is None:
+        try:
+            st.session_state.export_bytes = client.export_report(st.session_state.session_id)
+        except BackendError as e:
+            st.error(str(e))
 
     dl_col, reset_col = st.columns(2)
     with dl_col:
         st.download_button(
             label="📥 Xuất Excel Report",
-            data=excel_buf,
+            data=st.session_state.export_bytes or b"",
             file_name=f"VHL_Report_{st.session_state.sample_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True, type="primary",
+            disabled=st.session_state.export_bytes is None,
         )
     with reset_col:
         if st.button("🔄 Phân tích mẫu mới", key="btn_reset", use_container_width=True):

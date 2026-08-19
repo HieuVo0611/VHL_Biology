@@ -1,0 +1,13 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile.frontend"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  },
+  "_comment_variables": "Set on the Railway service (not in this file): BACKEND_URL = public domain of the backend service, e.g. https://<backend-service>.up.railway.app. backend_client.py reads it via os.environ.get('BACKEND_URL', 'http://localhost:8000'). Railway injects PORT automatically; the Dockerfile CMD binds Streamlit to it."
+}

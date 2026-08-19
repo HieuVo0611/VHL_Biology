@@ -1,0 +1,20 @@
+# Dockerfile.frontend — Streamlit frontend only (slim, no ML deps).
+# Build:  docker build -f Dockerfile.frontend -t vhl-frontend .
+# Run:    docker run -e PORT=9001 -e BACKEND_URL=http://backend:8000 -p 9001:9001 vhl-frontend
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps kept minimal; streamlit/pandas/numpy/plotly wheels are pure Python or manylinux.
+COPY requirements-frontend.txt .
+RUN pip install --no-cache-dir -r requirements-frontend.txt
+
+COPY app.py .
+COPY backend_client.py .
+COPY .streamlit/ .streamlit/
+
+ENV PORT=8501
+
+EXPOSE 8501
+
+CMD sh -c "streamlit run app.py --server.port ${PORT:-8501} --server.address 0.0.0.0 --server.headless true"
